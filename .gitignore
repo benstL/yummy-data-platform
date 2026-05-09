@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+.vscode/
+data/
+*.parquet
+*.csv
+*.log
+.airflow/
+dbt_packages/
+target/
