@@ -1,0 +1,9 @@
+duckdb
+dbt-duckdb
+fastapi
+uvicorn
+streamlit
+pandas
+requests
+boto3
+scikit-learn
