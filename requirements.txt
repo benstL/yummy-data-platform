@@ -1,9 +1,35 @@
-duckdb
-dbt-duckdb
-fastapi
-uvicorn
-streamlit
-pandas
-requests
-boto3
-scikit-learn
+# --- Orchestration & transformation ---
+dbt-duckdb>=1.7.0
+duckdb>=0.10.0
+ 
+# --- API & UI ---
+fastapi>=0.110.0
+uvicorn>=0.29.0
+streamlit>=1.33.0
+ 
+# --- ML / NLP ---
+scikit-learn>=1.4.0
+ 
+# --- Scraping recettes ---
+recipe-scrapers>=15.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+protego>=0.3.0
+cloudscraper>=1.2.71
+ 
+# --- Validation & contrats de données ---
+pydantic>=2.0.0
+ 
+# --- Données & formats Excel (CIQUAL) ---
+pandas>=2.0.0
+openpyxl>=3.1.0
+xlrd>=2.0.1
+ 
+# --- Stockage objet MinIO/S3 ---
+boto3>=1.34.0
+python-dotenv>=1.0.0
+ 
+# --- Ingestion sources tierces ---
+kaggle>=1.6.0
+selenium>=4.18.0
+ 

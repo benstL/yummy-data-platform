@@ -9,4 +9,4 @@ data/
 *.log
 .airflow/
 dbt_packages/
-target/
+target/*.egg-info/
