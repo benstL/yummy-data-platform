@@ -1,4 +1,9 @@
 """
+[STANDARD] Extract en main() libre — à rallier à BronzeExtractor post-MVP.
+   Décision MVP assumée : on ne convertit qu'un seul extract de référence
+   (ciqual) au standard pour prouver qu'il marche. Les 3 autres (faostat,
+   kaggle, eufic) restent en main() le temps du MVP. Done > perfect.
+
 Ingestion FAOSTAT QCL (Production Crops & Livestock) -> couche Bronze locale.
 Données partitionnées par date d'extraction (extraction_date=YYYYMMDD).
 L'upload vers MinIO est délégué à sync_to_minio.py (pattern unique du projet).

@@ -3,12 +3,12 @@
 
 Pour chaque URL découverte par crawl_urls.py :
 1. Télécharge le HTML brut
-2. Le parse avec recipe-scrapers
+2. Le parse prioritairement avec BeautifulSoup (JSON-LD) puis recipe-scrapers
 3. Valide contre le contrat Pydantic (schemas.RecipeModel)
 4. Sauvegarde en Bronze MinIO : HTML brut (gzip) + JSON validé
 
 Reprise sur erreur : la colonne "scraped" du CSV d'URLs (local) est mise à
-jour, donc on peut relancer sans re-scraper ce qui est déjà fait.
+jour EN MÊME TEMPS que l'envoi sur MinIO pour garantir l'intégrité.
 
 Usage :
     python -m extract.recipes_scraper.extract_recipes --site marmiton
@@ -24,6 +24,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 
 import pandas as pd
+from bs4 import BeautifulSoup
 from recipe_scrapers import scrape_html
 from pydantic import ValidationError
 
@@ -81,40 +82,87 @@ def save_bronze_html_s3(s3_client, site_name: str, recipe_id: str, html: str) ->
 
 
 def parse_with_recipe_scrapers(html: str, url: str) -> dict | None:
+    """Extrait la recette en combinant JSON-LD (prioritaire) et recipe_scrapers."""
+    extracted = {
+        "url": url,
+        "title": None,
+        "ingredients": None,
+        "instructions": None,
+        "total_time": None,
+        "prep_time": None,
+        "cook_time": None,
+        "yields": None,
+        "image": None,
+        "host": None,
+        "category": None,
+        "cuisine": None,
+        "nutrients": None,
+        "ratings": None,
+    }
+
+    # 1. Stratégie Robuste : Le JSON-LD (Schema.org) caché dans le HTML
+    soup = BeautifulSoup(html, 'html.parser')
+    json_ld_scripts = soup.find_all('script', type='application/ld+json')
+    
+    for script in json_ld_scripts:
+        if script.string:
+            try:
+                data = json.loads(script.string)
+                items = data.get('@graph', data) if isinstance(data, dict) else data
+                if not isinstance(items, list):
+                    items = [items]
+                    
+                for item in items:
+                    if item.get('@type') == 'Recipe':
+                        extracted["title"] = item.get('name')
+                        extracted["ingredients"] = item.get('recipeIngredient')
+                        extracted["instructions"] = item.get('recipeInstructions')
+                        extracted["yields"] = item.get('recipeYield')
+                        extracted["category"] = item.get('recipeCategory')
+            except json.JSONDecodeError:
+                pass
+
+    # 2. Stratégie de repli : utiliser la librairie pour ce qui manque
     try:
         scraper = scrape_html(html, org_url=url)
-
         def safe(getter):
             try:
                 return getter()
             except Exception:
                 return None
 
-        return {
-            "url": url,
-            "title": safe(scraper.title),
-            "total_time": safe(scraper.total_time),
-            "prep_time": safe(scraper.prep_time),
-            "cook_time": safe(scraper.cook_time),
-            "yields": safe(scraper.yields),
-            "ingredients": safe(scraper.ingredients),
-            "instructions": safe(scraper.instructions),
-            "image": safe(scraper.image),
-            "host": safe(scraper.host),
-            "category": safe(scraper.category),
-            "cuisine": safe(scraper.cuisine),
-            "nutrients": safe(scraper.nutrients),
-            "ratings": safe(scraper.ratings),
-        }
+        extracted["title"] = extracted["title"] or safe(scraper.title)
+        extracted["ingredients"] = extracted["ingredients"] or safe(scraper.ingredients)
+        extracted["total_time"] = safe(scraper.total_time)
+        extracted["prep_time"] = safe(scraper.prep_time)
+        extracted["cook_time"] = safe(scraper.cook_time)
+        extracted["image"] = safe(scraper.image)
+        extracted["host"] = safe(scraper.host)
+        extracted["cuisine"] = safe(scraper.cuisine)
+        extracted["nutrients"] = safe(scraper.nutrients)
+        extracted["ratings"] = safe(scraper.ratings)
+        
+        # Formatage des instructions JSON-LD
+        if isinstance(extracted["instructions"], list) and len(extracted["instructions"]) > 0:
+            if isinstance(extracted["instructions"][0], dict):
+                 extracted["instructions"] = "\n".join([step.get("text", "") for step in extracted["instructions"]])
+            else:
+                 extracted["instructions"] = "\n".join(extracted["instructions"])
+        else:
+             extracted["instructions"] = extracted["instructions"] or safe(scraper.instructions)
+
     except Exception as error:
-        logger.warning(f"Parsing échoué pour {url}: {error}")
-        return None
+        logger.warning(f"Fallback recipe_scrapers échoué pour {url}: {error}")
+    
+    return extracted
 
 
 def save_bronze_json_s3(s3_client, site_name: str, recipes: list[dict]) -> None:
     """Envoie le JSON compilé et validé sur MinIO."""
-    extraction_date = datetime.now(UTC).strftime("%Y%m%d")
-    s3_key = f"recipes/json/{site_name}_recipes_{extraction_date}.json"
+    # Heure exacte ajoutée pour garantir l'unicité et éviter les écrasements
+    extraction_time = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    s3_key = f"recipes/json/{site_name}_recipes_{extraction_time}.json"
+    
     payload = {
         "site": site_name,
         "extracted_at": datetime.now(UTC).isoformat(),
@@ -167,7 +215,7 @@ def scrape_site(s3_client, site_name: str, max_recipes: int) -> None:
         raw_recipe["recipe_id"] = recipe_id
         raw_recipe["site"] = site_name
 
-        # Validation Pydantic : le contrat de données Bronze
+        # Validation Pydantic
         try:
             validated = RecipeModel(**raw_recipe)
             recipes.append(validated.model_dump(mode="json"))
@@ -178,14 +226,25 @@ def scrape_site(s3_client, site_name: str, max_recipes: int) -> None:
                 f"Champ '{err['loc'][0]}' -> {err['msg']}" for err in e.errors()
             )
             logger.error(f"Rejet Pydantic pour {url} : {erreurs}")
-            df_urls.loc[idx, "scraped"] = True  # ne pas rebloquer la file
+            
+            # --- 🕵️‍♂️ ASTUCE DE DEBUGGING SENIOR ---
+            # On sauvegarde le HTML qui a causé l'erreur pour l'analyser visuellement
+            debug_path = Path("debug_marmiton_antibot.html")
+            debug_path.write_text(html, encoding="utf-8")
+            logger.error(f"🛑 HTML suspect sauvegardé dans {debug_path.name}. Ouvre ce fichier dans ton navigateur !")
+            # ---------------------------------------
+            
+            df_urls.loc[idx, "scraped"] = True
             continue
 
-        # Checkpoint local tous les 50 succès
+        # Checkpoint synchronisé : on sauvegarde l'état ET la donnée en même temps
         if success_count > 0 and success_count % 50 == 0:
+            save_bronze_json_s3(s3_client, site_name, recipes)
             df_urls.to_csv(urls_file, index=False)
-            logger.info("Checkpoint local (CSV mis à jour)")
+            recipes = [] # On vide la mémoire vive
+            logger.info("Checkpoint: 50 recettes sécurisées sur MinIO.")
 
+    # Fin de boucle : on sauvegarde ce qui reste
     df_urls.to_csv(urls_file, index=False)
     if recipes:
         save_bronze_json_s3(s3_client, site_name, recipes)
@@ -201,7 +260,6 @@ def main():
 
     sites = list(SITES_CONFIG.keys()) if args.site == "all" else [args.site]
 
-    # Connexion MinIO créée une fois, via common, et passée aux fonctions
     s3_client = get_s3_client()
     ensure_bucket_exists(s3_client)
 

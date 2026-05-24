@@ -1,4 +1,8 @@
 """
+[STANDARD] Extract en main() libre — restera HORS standard BronzeExtractor.
+   Cas particulier assumé : Selenium + Chrome, one-shot manuel, ne tourne pas
+   en CI/DAG. Le rallier au standard batch n'apporterait rien. Documenté tel quel.
+
 Extraction de la saisonnalité fruits/légumes par pays (EUFIC) -> Bronze local.
 
 ⚠️ Extract MANUEL one-shot : dépend de Selenium + Chrome, ne tourne PAS en CI

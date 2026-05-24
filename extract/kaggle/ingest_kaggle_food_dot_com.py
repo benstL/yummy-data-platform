@@ -1,4 +1,7 @@
 """
+[STANDARD] Extract en main() libre — à rallier à BronzeExtractor post-MVP.
+   (cf. note dans extract/faostat/extract_faostat_qcl.py)
+
 Ingestion Kaggle Food.com -> couche Bronze locale (data/bronze/food-com/).
 L'upload vers MinIO est délégué à sync_to_minio.py (pattern unique du projet).
 """

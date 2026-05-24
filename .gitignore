@@ -10,3 +10,14 @@ data/
 .airflow/
 dbt_packages/
 target/*.egg-info/
+# Logs (régénérables)
+logs/
+**/logs/
+*.log
+
+# Artefacts dbt (régénérés par `dbt run`)
+**/target/
+**/dbt_packages/
+*.duckdb
+*.egg-info/
+*.egg-info/
