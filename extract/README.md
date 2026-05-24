@@ -5,8 +5,10 @@ recettes durables). Cette documentation couvre la **couche d'extraction** : coll
 des sources brutes et chargement dans la couche **Bronze** du pattern Medallion,
 stockée dans **MinIO** (stockage objet compatible S3).
 
-> **État du projet** : la couche d'extraction est fonctionnelle et testée de bout en
-> bout. Les couches Silver (transformation) et Gold (Yummy Score) sont en cours.
+> **État du projet** : couche d'extraction fonctionnelle. Cinq sources validées en
+> cycle complet (CIQUAL, Agribalyse, Kaggle, FAOSTAT, Marmiton) ; EUFIC en extract
+> manuel. Les couches Silver (transformation) et Gold (Yummy Score) sont traitées
+> séparément (dossier `transform/`, hors périmètre de cette doc).
 
 ---
 
@@ -15,10 +17,15 @@ stockée dans **MinIO** (stockage objet compatible S3).
 | Source | Contenu | Pilier Yummy Score | Méthode |
 |---|---|---|---|
 | **CIQUAL** (ANSES) | Composition nutritionnelle | Nutrition | Téléchargement `.xls` |
-| **FAOSTAT QCL** (FAO) | Production agricole mondiale | Empreinte carbone (proxy) | Téléchargement bulk ZIP |
+| **Agribalyse 3.1** (ADEME) | Impacts environnementaux des aliments | Empreinte carbone | Téléchargement `.xlsx` |
+| **FAOSTAT QCL** (FAO) | Production agricole mondiale | Empreinte carbone (proxy secondaire) | Téléchargement bulk ZIP |
 | **EUFIC** | Saisonnalité fruits/légumes par pays | Saisonnalité | Scraping Selenium (manuel) |
 | **Kaggle Food.com** | Recettes + interactions utilisateurs | Satisfaction | API Kaggle |
 | **Marmiton / 750g** | Recettes web françaises | Satisfaction (avis) | Scraping `requests` + `recipe-scrapers` |
+
+> **Empreinte carbone** : Agribalyse (ADEME) est la source de référence (kg CO2 eq / kg
+> de produit). FAOSTAT sert de proxy secondaire (volumes de production), non substituable
+> à Agribalyse pour le calcul d'impact.
 
 ---
 
@@ -67,13 +74,20 @@ répertoire, en CLI comme sous un orchestrateur.
 pip install -e .
 ```
 
-Pour les extracts qui nécessitent des dépendances lourdes (isolées en options) :
+Les dépendances de base couvrent CIQUAL, Agribalyse, FAOSTAT et le scraper de recettes
+(dont `brotli`, requis pour décoder les réponses HTTP compressées — voir §10).
+
+Pour les extracts à dépendances lourdes (isolées en options) :
 
 ```bash
-pip install -e ".[eufic]"     # ajoute Selenium (scraping EUFIC uniquement)
-pip install -e ".[kaggle]"    # ajoute le client Kaggle
+pip install -e ".[eufic]"          # ajoute Selenium (scraping EUFIC uniquement)
+pip install -e ".[kaggle]"         # ajoute le client Kaggle
 pip install -e ".[eufic,kaggle]"   # les deux
 ```
+
+> ⚠️ **À vérifier dans `pyproject.toml`** : confirmer que les extras `[eufic]` et
+> `[kaggle]` sont bien définis dans `[project.optional-dependencies]`. Sinon ces
+> commandes échouent.
 
 Vérifier l'installation :
 
@@ -170,8 +184,9 @@ Le projet suit **un pattern unique** avec une exception justifiée :
 La synchronisation reproduit l'arborescence locale comme clé S3 :
 
 ```
-data/bronze/ciqual/Table_Ciqual_2025.xls   ->   s3://bronze/ciqual/Table_Ciqual_2025.xls
-data/bronze/recipes/json/marmiton.json     ->   s3://bronze/recipes/json/marmiton.json
+data/bronze/ciqual/ciqual_composition_nutritionnelle.csv  ->  s3://bronze/ciqual/ciqual_composition_nutritionnelle.csv
+data/bronze/agribalyse/agribalyse_synthese.csv            ->  s3://bronze/agribalyse/agribalyse_synthese.csv
+data/bronze/recipes/json/marmiton_recipes_<date>.json     ->  s3://bronze/recipes/json/marmiton_recipes_<date>.json
 ```
 
 ### 6.3 Idempotence
@@ -179,6 +194,28 @@ data/bronze/recipes/json/marmiton.json     ->   s3://bronze/recipes/json/marmito
 `sync_to_minio.py` compare la taille de chaque fichier local avec sa version distante
 et ne réuploade que ce qui a changé. Relancer la synchronisation plusieurs fois ne crée
 **aucun doublon**.
+
+> **Limite connue** : la synchronisation est un *upsert* (ajout/mise à jour), pas un
+> *miroir*. Un fichier supprimé en local n'est pas supprimé sur MinIO. Voir §11.
+
+### 6.4 Standard d'extraction : `BronzeExtractor`
+
+Les extracts batch héritent de `extract/base_extractor.py` (classe abstraite
+`BronzeExtractor`) et implémentent trois méthodes :
+
+- **`fetch()`** — télécharge la source brute telle quelle (aucune transformation).
+- **`normalize()`** — conversion de **FORMAT uniquement** (`.xls`→`.csv`, `.xlsx`→`.csv`,
+  dézippage). Interdit ici : renommer des colonnes, filtrer des lignes, caster des types
+  — cela relève de **Silver** (dbt). Bronze = brut lisible par DuckDB, rien de plus.
+- **`validate()`** — garde-fou minimal (fichier présent, non vide, volume plausible).
+
+L'orchestration `run()` est commune et ne doit pas être surchargée (mêmes logs, même
+structure de sortie pour tous les extracts).
+
+Extracts ralliés au standard : **CIQUAL**, **Agribalyse**.
+Extracts encore en `main()` libre (à rallier post-MVP) : **FAOSTAT**, **Kaggle**.
+Hors standard par nature : **EUFIC** (Selenium manuel) et le **scraper de recettes**
+(pattern streaming, écriture directe MinIO).
 
 ---
 
@@ -194,7 +231,21 @@ python -m extract.ciqual.ingest_ciqual
 python -m extract.sync_to_minio
 ```
 
-### 7.2 FAOSTAT (production agricole)
+> Le `.xls` legacy est converti en CSV (un par onglet) via le moteur `xlrd`, puis
+> supprimé. Le renommage des colonnes (ex. `alim_code` → `ingredient_id`) relève de Silver.
+
+### 7.2 Agribalyse (empreinte carbone)
+
+```bash
+python -m extract.agribalyse.ingest_agribalyse
+python -m extract.sync_to_minio
+```
+
+> Le `.xlsx` ADEME est converti en CSV brut (toutes colonnes conservées). Sortie en CSV
+> et non en Parquet, car certaines colonnes ADEME sont de type mixte (le typage propre
+> se fait en Silver). Lecture `.xlsx` via `openpyxl`.
+
+### 7.3 FAOSTAT (production agricole)
 
 ```bash
 python -m extract.faostat.extract_faostat_qcl
@@ -202,9 +253,10 @@ python -m extract.sync_to_minio
 ```
 
 > Fichier volumineux (plusieurs centaines de Mo décompressés). Le ZIP source est
-> supprimé après extraction pour économiser l'espace disque.
+> supprimé après extraction pour économiser l'espace disque. Données partitionnées par
+> date d'extraction (`extraction_date=YYYYMMDD/`).
 
-### 7.3 Kaggle (recettes + interactions)
+### 7.4 Kaggle (recettes + interactions)
 
 ```bash
 # Nécessite : pip install -e ".[kaggle]" + KAGGLE_API_TOKEN dans .env
@@ -212,7 +264,7 @@ python -m extract.kaggle.ingest_kaggle_food_dot_com
 python -m extract.sync_to_minio
 ```
 
-### 7.4 EUFIC (saisonnalité) — extract manuel
+### 7.5 EUFIC (saisonnalité) — extract manuel
 
 ```bash
 # Nécessite : pip install -e ".[eufic]" + Chrome installé dans WSL
@@ -224,7 +276,7 @@ python -m extract.sync_to_minio
 > dans un DAG planifié. La saisonnalité évolue peu : le CSV produit est figé comme
 > donnée de référence et n'est re-scrapé qu'occasionnellement.
 
-### 7.5 Recettes web (Marmiton, 750g) — scraping en 2 étapes
+### 7.6 Recettes web (Marmiton, 750g) — scraping en 2 étapes
 
 ```bash
 # Étape 1 : découvrir les URLs de recettes (écrit un CSV local)
@@ -237,10 +289,14 @@ python -m extract.recipes_scraper.extract_recipes --site 750g --max 2000
 ```
 
 > Le scraping respecte le `robots.txt` de chaque site (vérifié dynamiquement) et un
-> délai de 3 s entre requêtes. Chaque recette est validée contre un contrat Pydantic
-> (`schemas.py`) avant d'être stockée : une recette sans titre ou sans ingrédient est
-> rejetée. La reprise sur erreur est gérée via la colonne `scraped` du CSV d'URLs :
+> délai d'au moins 3 s entre requêtes. L'extraction combine deux stratégies : JSON-LD
+> (schema.org) en priorité, puis `recipe-scrapers` en repli. Chaque recette est validée
+> contre un contrat Pydantic (`schemas.py`) : une recette sans titre ou sans ingrédient
+> est rejetée. La reprise sur erreur est gérée via la colonne `scraped` du CSV d'URLs :
 > relancer le script ne re-scrape pas ce qui est déjà fait.
+
+> **Posture éthique** : aucun contournement de protection anti-bot. Si un site bloque
+> activement, il est retiré du périmètre (voir `sites_config.py` et le rapport éthique).
 
 ---
 
@@ -248,14 +304,14 @@ python -m extract.recipes_scraper.extract_recipes --site 750g --max 2000
 
 Procéder par niveaux croissants. Ne passer au niveau suivant que si le précédent passe.
 
-### Niveau 1 — Tous les modules s'importent
+### Niveau 1 — Tous les modules s'importent (test automatisé)
 
 ```bash
-python -c "import common.minio_client, common.http.http_client, common.http.robots_checker, common.http.config; print('common OK')"
-python -c "import extract.recipes_scraper.extract_recipes, extract.recipes_scraper.crawl_urls; print('scraper OK')"
+pytest tests/test_imports.py -v
 ```
 
-Les deux doivent afficher `OK`.
+Les trois tests doivent passer. Sans pytest, le fichier est lançable seul :
+`python -m tests.test_imports` (affiche « OK — tous les imports de base passent »).
 
 ### Niveau 2 — Connexion MinIO
 
@@ -268,7 +324,7 @@ python -c "from common.minio_client import get_s3_client, ensure_bucket_exists; 
 
 ```bash
 python -m extract.ciqual.ingest_ciqual          # ingestion locale
-ls -lh data/bronze/ciqual/                       # le fichier doit être présent
+ls -lh data/bronze/ciqual/                       # les CSV doivent être présents
 python -m extract.sync_to_minio                  # 1er sync : monte les fichiers
 python -m extract.sync_to_minio                  # 2e sync : doit dire "0 monté, N déjà à jour"
 ```
@@ -281,14 +337,17 @@ Le **2e sync affichant `0 fichier(s) montés`** prouve l'idempotence du pipeline
 
 ```
 yummy-data-platform/
+├── .github/workflows/ci.yml     # CI : lance le test d'imports
 ├── common/                      # code partagé (imports absolus)
 │   ├── minio_client.py          # connexion MinIO centralisée
 │   └── http/                    # utilitaires HTTP génériques
-│       ├── config.py            # headers, timeouts, délais
+│       ├── config.py            # headers, timeouts, délais (source de vérité HTTP)
 │       ├── http_client.py       # session + gestion 429/backoff
 │       └── robots_checker.py    # respect dynamique du robots.txt
 ├── extract/
-│   ├── ciqual/                  # nutrition (ANSES)
+│   ├── base_extractor.py        # classe standard BronzeExtractor
+│   ├── ciqual/                  # nutrition (ANSES) — rallié au standard
+│   ├── agribalyse/              # empreinte carbone (ADEME) — rallié au standard
 │   ├── faostat/                 # production agricole (FAO)
 │   ├── eufic/                   # saisonnalité (manuel, Selenium)
 │   ├── kaggle/                  # recettes + interactions
@@ -297,8 +356,10 @@ yummy-data-platform/
 │   │   ├── extract_recipes.py   # étape 2 : scraping + validation
 │   │   ├── sites_config.py      # config spécifique des sites
 │   │   └── schemas.py           # contrat de données Pydantic
-│   └── sync_to_minio.py         # synchronisation local -> MinIO (idempotente)
-├── transform/                   # couche Silver (en cours)
+│   ├── sync_to_minio.py         # synchronisation local -> MinIO (idempotente)
+│   └── README.md                # cette documentation
+├── tests/test_imports.py        # test minimal d'importabilité
+├── transform/                   # couches Silver/Gold (documentées séparément)
 ├── data/bronze/                 # données brutes locales (gitignored)
 ├── docker-compose.yml           # MinIO (volume persistant, secrets via .env)
 ├── pyproject.toml               # dépendances + config du package
@@ -314,6 +375,8 @@ yummy-data-platform/
 | `ModuleNotFoundError: No module named 'common'` | Package non installé | `pip install -e .` |
 | `RuntimeError: AWS_ACCESS_KEY_ID ... manquants` | `.env` non lu | Lancer depuis la racine ; vérifier les noms de variables |
 | MinIO injoignable | Conteneur non démarré | `docker compose up -d minio` |
+| Recettes = charabia illisible (`q9Y...`) | `brotli` manquant (réponse HTTP compressée non décodée) | `pip install brotli` (déjà en dépendance ; refaire `pip install -e .`) |
+| `ImportError: Missing optional dependency 'openpyxl'` | `openpyxl` absent (lecture `.xlsx` Agribalyse) | `pip install openpyxl` (déjà en dépendance) |
 | Scraping bloqué (429) | Trop de requêtes | Le client attend automatiquement (Retry-After + backoff) |
 | `kaggle: command not found` ou auth échouée | Extra non installé / jeton absent | `pip install -e ".[kaggle]"` + `KAGGLE_API_TOKEN` |
 
@@ -323,14 +386,23 @@ yummy-data-platform/
 
 Points non bloquants pour le MVP, à traiter en montée de version :
 
-- **Lecture CIQUAL en Silver** : le fichier est un vrai `.xls` binaire legacy. La lecture
-  devra être explicite : `pd.read_excel(path, engine="xlrd")` (xlrd est déjà installé).
-- **Imports du scraper** : `crawl_urls.py` et `extract_recipes.py` utilisent des imports
-  absolus (`common.http.*`, `extract.recipes_scraper.*`) — fonctionnels partout.
-- **Pas de tests automatisés** : un test minimal d'importabilité (`tests/test_imports.py`)
-  et une CI GitHub Actions qui le lance protégeraient contre les imports cassés.
+- **Extracts non ralliés au standard** : FAOSTAT et Kaggle restent en `main()` libre.
+  Les rallier à `BronzeExtractor` uniformiserait logs et structure. EUFIC et le scraper
+  restent volontairement hors standard (Selenium manuel / pattern streaming).
+- **Échec silencieux du scraper** : un scrape qui valide 0 recette sur N URLs en attente
+  est aujourd'hui loggé comme « succès ». Ajouter un garde-fou
+  (`if success_count == 0 and len(pending) > 0: raise`) pour transformer un échec
+  silencieux en alerte explicite.
+- **Sync non miroir** : `sync_to_minio.py` ajoute mais ne supprime jamais côté MinIO.
+  Un fichier supprimé/renommé en local laisse un fantôme sur le bucket. Acceptable en
+  MVP (upsert) ; une vraie synchro miroir est à prévoir post-MVP.
+- **CI à froid** : la CI lance le test d'imports mais pas un cycle d'extract complet
+  après un `pip install -e .` neuf. Trois bugs de dépendances d'exécution (openpyxl,
+  brotli) et un de typage (Parquet) ont été trouvés manuellement — une CI qui installe
+  à froid puis lance un extract léger les attraperait automatiquement.
 - **Secrets en `.env`** : suffisant en local. En production réelle, utiliser des
   variables d'environnement injectées par l'orchestrateur ou un coffre-fort.
-- **Site `atelierdeschefs.fr`** : configuré dans une version antérieure puis retiré du
-  périmètre (signal `ai-train=no` dans son robots.txt). Argument conservé dans le rapport
-  éthique.
+- **Sites retirés du périmètre** : `atelierdeschefs.fr` (signal `ai-train=no` dans son
+  robots.txt) et `cuisineaz.com` (robots.txt bloque les pages de recettes). Arguments
+  conservés dans le rapport éthique.
+</file_text>
