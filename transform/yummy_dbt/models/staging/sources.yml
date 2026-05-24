@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: minio_bronze
+    description: "Couche Bronze : données brutes stockées sur MinIO (S3)."
+    tables:
+      # --- 1. CIQUAL (Nutrition) ---
+      - name: raw_ciqual
+        description: "Composition nutritionnelle ANSES (CIQUAL)."
+        meta:
+          external_location: "read_csv_auto('s3://bronze/ciqual/ciqual_composition_nutritionnelle.csv', header=True)"
+
+      # --- 2. Agribalyse (Empreinte carbone) ---
+      - name: raw_agribalyse
+        description: "Impacts environnementaux ADEME, dont kg CO2 eq/kg."
+        meta:
+          external_location: "read_csv_auto('s3://bronze/agribalyse/agribalyse_synthese.csv', header=True)"
+
+      # --- 3. EUFIC (Saisonnalité) ---
+      - name: raw_eufic
+        description: "Saisonnalité fruits/légumes par pays européen."
+        meta:
+          external_location: "read_csv_auto('s3://bronze/eufic/eufic_raw_*.csv')"
+
+      # --- 4. Kaggle Food.com : recettes (Catalogue) ---
+      - name: raw_recipes
+        description: "Catalogue de recettes Food.com (anglais)."
+        meta:
+          external_location: "read_csv_auto('s3://bronze/food-com/RAW_recipes.csv', header=True)"
+
+      # --- 5. Kaggle Food.com : interactions (Satisfaction) ---
+      - name: raw_interactions
+        description: "Notes et avis utilisateurs Food.com."
+        meta:
+          external_location: "read_csv_auto('s3://bronze/food-com/RAW_interactions.csv', header=True)"
+
+      # --- 6. Recettes web FR (Marmiton / 750g) ---
+      - name: raw_recipes_web
+        description: "Recettes scrapées Marmiton/750g (JSON, enveloppe site+recipes[])."
+        meta:
+          external_location: "read_json('s3://bronze/recipes/json/*_recipes_*.json')"
+
+      # --- 7. FAOSTAT (proxy carbone secondaire) ---
+      - name: raw_faostat
+        description: "Production agricole FAOSTAT QCL (proxy carbone secondaire)."
+        meta:
+          external_location: "read_csv_auto('s3://bronze/faostat/qcl/extraction_date=*/Production_Crops_Livestock_E_All_Data_(Normalized).csv', union_by_name=True)"

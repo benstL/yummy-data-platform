@@ -1,0 +1,18 @@
+yummy_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: yummy.duckdb
+      threads: 4
+      # On demande à DuckDB de télécharger à la volée les extensions S3
+      extensions:
+        - httpfs
+        - aws
+      # Configuration pour taper sur notre MinIO local via ton fichier .env
+      settings:
+        s3_endpoint: localhost:9000
+        s3_access_key_id: "{{ env_var('AWS_ACCESS_KEY_ID') }}"
+        s3_secret_access_key: "{{ env_var('AWS_SECRET_ACCESS_KEY') }}"
+        s3_url_style: path
+        s3_use_ssl: false

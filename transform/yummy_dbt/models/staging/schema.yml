@@ -1,0 +1,156 @@
+version: 2
+
+models:
+  - name: stg_ciqual
+    description: "Composition nutritionnelle CIQUAL (ANSES). Pilier Nutrition. Source sale nettoyee via macro ciqual_num()."
+    columns:
+      - name: ingredient_id
+        description: "Code aliment CIQUAL. Cle de jointure vers Agribalyse."
+        tests: [unique, not_null]
+      - name: ingredient_name
+        description: "Nom francais de l'aliment, minuscules."
+        tests: [not_null]
+      - name: category_name
+        description: "Groupe d'aliment CIQUAL."
+      - name: energy_kcal_100g
+        description: "Energie kcal/100g (Reglement UE 1169/2011)."
+      - name: proteins_100g
+        description: "Proteines g/100g (N x 6.25)."
+      - name: carbs_100g
+        description: "Glucides g/100g."
+      - name: fat_100g
+        description: "Lipides totaux g/100g."
+      - name: sugars_100g
+        description: "Sucres totaux g/100g. Entree Nutri-Score."
+      - name: saturated_fat_100g
+        description: "Acides gras satures g/100g. Entree Nutri-Score."
+      - name: fiber_100g
+        description: "Fibres g/100g. Entree Nutri-Score."
+      - name: salt_100g
+        description: "Sel chlorure de sodium g/100g."
+
+  - name: stg_agribalyse
+    description: "Impacts environnementaux Agribalyse 3.1 (ADEME). Pilier Carbone. Source propre."
+    columns:
+      - name: ciqual_code
+        description: "Code CIQUAL du produit. Cle de jointure vers stg_ciqual."
+        tests: [not_null]
+      - name: agb_code
+        description: "Code AGB interne ADEME."
+      - name: product_name
+        description: "Nom francais du produit, minuscules."
+      - name: food_group
+        description: "Groupe d'aliment ADEME."
+      - name: co2_kg_per_kg
+        description: "Empreinte carbone kg CO2 eq/kg. Pilier carbone."
+        tests: [not_null]
+      - name: co2_data_quality
+        description: "DQR ADEME (1 excellente -> 5 tres faible). Trace la fiabilite du CO2."
+      - name: season_code
+        description: "Proxy saison ADEME (0 hors saison, 1 de saison, 2 mix conso FR)."
+
+  - name: stg_eufic
+    description: "Saisonnalite fruits/legumes par pays (EUFIC). Pilier Saisonnalite. Mois normalises en numero."
+    columns:
+      - name: product_name
+        description: "Nom du produit en anglais, minuscules (cle floue vers CIQUAL)."
+        tests: [not_null]
+      - name: product_type
+        description: "fruit ou vegetable."
+      - name: country
+        description: "Pays europeen, minuscules sans espace."
+        tests: [not_null]
+      - name: month_name
+        description: "Mois en anglais minuscules."
+      - name: month_num
+        description: "Mois en numero (1-12)."
+        tests:
+          - not_null
+          - accepted_values:
+             arguments:
+              values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+  - name: stg_interactions
+    description: "Notes et avis utilisateurs Food.com (Kaggle). Pilier Satisfaction. ~1,1M lignes."
+    columns:
+      - name: recipe_id
+        description: "Recette notee. Cle de jointure vers stg_recipes."
+        tests: [not_null]
+      - name: user_id
+        description: "Auteur de l'avis."
+      - name: reviewed_at
+        description: "Date de l'avis."
+      - name: rating
+        description: "Note de 0 a 5."
+        tests:
+          - not_null
+          - accepted_values:
+             arguments:
+              values: [0, 1, 2, 3, 4, 5]
+      - name: review_text
+        description: "Texte de l'avis."
+
+  - name: stg_recipes
+    description: "Catalogue de recettes Food.com (Kaggle, anglais). Listes converties en listes DuckDB."
+    columns:
+      - name: recipe_id
+        description: "Identifiant unique de la recette. Cle."
+        tests: [unique, not_null]
+      - name: recipe_name
+        description: "Nom de la recette, minuscules."
+        tests: [not_null]
+      - name: total_minutes
+        description: "Temps total (minutes)."
+      - name: submitted_at
+        description: "Date de soumission."
+      - name: n_steps
+        description: "Nombre d'etapes."
+      - name: n_ingredients
+        description: "Nombre d'ingredients."
+      - name: description
+        description: "Description libre."
+      - name: ingredients
+        description: "Liste des ingredients (LISTE DuckDB, anglais)."
+      - name: tags
+        description: "Liste de tags (LISTE DuckDB)."
+      - name: nutrition_raw
+        description: "BRUT : liste de 7 valeurs [cal, fat, sugar, sodium, protein, sat_fat, carbs]. A parser en intermediate."
+
+  - name: stg_recipes_web
+    description: "Recettes web FR (Marmiton/750g) depliees du JSON. Complement francais de Kaggle. Notes parfois NULL."
+    columns:
+      - name: recipe_id
+        description: "Slug de la recette (VARCHAR, type different de stg_recipes Kaggle qui est BIGINT)."
+        tests: [not_null]
+      - name: site
+        description: "Site source : marmiton ou 750g."
+      - name: recipe_name
+        description: "Titre de la recette, minuscules."
+        tests: [not_null]
+      - name: ingredients
+        description: "Liste des ingredients (VARCHAR[], francais)."
+      - name: n_ingredients
+        description: "Nombre d'ingredients."
+      - name: rating
+        description: "Note de la recette (DOUBLE, peut etre NULL). Pilier satisfaction."
+      - name: total_minutes
+        description: "Temps total (minutes)."
+      - name: url
+        description: "URL source de la recette."
+
+  - name: stg_faostat
+    description: "Production agricole FAOSTAT (FAO). Proxy carbone SECONDAIRE. Filtre France/Production/>=2018, dedoublonne."
+    columns:
+      - name: product
+        description: "Produit agricole (anglais)."
+        tests: [not_null]
+      - name: year
+        description: "Annee de production (>= 2018)."
+        tests: [not_null]
+      - name: production_value
+        description: "Volume produit."
+        tests: [not_null]
+      - name: unit
+        description: "Unite (ex. t tonnes)."
+      - name: area
+        description: "Zone geographique (France)."
