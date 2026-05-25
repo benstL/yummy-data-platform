@@ -140,7 +140,7 @@ nlp/         -> pipelines NLP
 
 ---
 
-# 🇬🇧 Overview
+# EN Overview
 
 YUMMY is a modern data platform focused on sustainable food analytics, seasonality, and agricultural supply chain awareness.
 
@@ -154,7 +154,7 @@ to build more responsible food recommendation systems.
 
 ---
 
-# 🇬🇧 Goals
+# EN Goals
 
 YUMMY aims to recommend recipes according to:
 - country,
@@ -169,7 +169,7 @@ The platform also promotes awareness around:
 
 ---
 
-# 🇬🇧 Architecture
+# EN Architecture
 
 YUMMY follows a Medallion Architecture approach:
 
@@ -186,7 +186,7 @@ Current status:
 
 ---
 
-# 🇬🇧 Current Data Sources
+# EN Current Data Sources
 
 | Source | Purpose | Status |
 |---|---|---|
@@ -196,7 +196,7 @@ Current status:
 
 ---
 
-# 🇬🇧 Current Features
+# EN Current Features
 
 - Data extraction pipelines
 - Bronze/Silver transformation pipelines
@@ -207,7 +207,7 @@ Current status:
 
 ---
 
-# 🇬🇧 Planned Gold Metrics (V1)
+# EN Planned Gold Metrics (V1)
 
 Version 1 includes a first analytical Gold layer with business-oriented metrics.
 
@@ -222,7 +222,7 @@ Examples:
 
 ---
 
-# 🇬🇧 Tech Stack
+# EN Tech Stack
 
 ## Data Engineering
 - Python
@@ -243,7 +243,7 @@ Examples:
 
 ---
 
-# 🇬🇧 Project Structure
+# EN Project Structure
 
 ```txt
 extract/     -> extraction pipelines
@@ -258,7 +258,7 @@ nlp/         -> NLP pipelines
 
 ---
 
-# 🇬🇧 Roadmap
+# EN Roadmap
 
 ## V1
 - Bronze/Silver pipelines
