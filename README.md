@@ -45,7 +45,7 @@ Le projet suit une architecture Medallion :
 Statut actuel :
 - Pipelines Bronze opérationnels
 - Pipelines Silver opérationnels
-- Couche Gold en cours de conception
+- Couche Gold en cours de développement
 
 ---
 
@@ -62,11 +62,26 @@ Statut actuel :
 # 🇫🇷 Fonctionnalités actuelles
 
 - Extraction de données
-- Pipelines de transformation Silver
+- Pipelines de transformation Bronze/Silver
 - Nettoyage NLP
 - Export Parquet
 - Export d’échantillons CSV
 - Architecture modulaire
+
+---
+
+# 🇫🇷 Métriques Gold prévues (V1)
+
+La V1 du projet prévoit l’implémentation d’une première couche analytique Gold avec des métriques métier.
+
+Exemples de métriques :
+- score de popularité recette,
+- score de satisfaction utilisateur,
+- nombre d’ingrédients,
+- temps de préparation total,
+- score de complexité,
+- score de saisonnalité,
+- indicateurs de disponibilité agricole.
 
 ---
 
@@ -102,4 +117,173 @@ api/         -> services API
 app/         -> application frontend
 ml/          -> workflows machine learning
 nlp/         -> pipelines NLP
-````
+```
+
+---
+
+# 🇫🇷 Roadmap
+
+## V1
+- Pipelines Bronze/Silver
+- Intégration Food.com
+- Intégration EUFIC
+- Intégration FAOSTAT
+- Première couche Gold analytique
+- Métriques recettes et saisonnalité
+
+## V2
+- Recommandation intelligente
+- API FastAPI
+- Dashboard Streamlit
+- Analyse avancée de durabilité alimentaire
+- NLP avancé et moteurs de recommandation
+
+---
+
+# 🇬🇧 Overview
+
+YUMMY is a modern data platform focused on sustainable food analytics, seasonality, and agricultural supply chain awareness.
+
+The project combines:
+- recipes,
+- user reviews,
+- seasonality datasets,
+- global agricultural statistics
+
+to build more responsible food recommendation systems.
+
+---
+
+# 🇬🇧 Goals
+
+YUMMY aims to recommend recipes according to:
+- country,
+- seasonality,
+- agricultural availability,
+- user satisfaction.
+
+The platform also promotes awareness around:
+- seasonal consumption,
+- food supply chains,
+- agricultural data analytics.
+
+---
+
+# 🇬🇧 Architecture
+
+YUMMY follows a Medallion Architecture approach:
+
+| Layer | Description |
+|---|---|
+| Bronze | Raw extracted datasets |
+| Silver | Cleaned and standardized datasets |
+| Gold | Enriched analytical datasets |
+
+Current status:
+- Bronze pipelines implemented
+- Silver pipelines implemented
+- Gold layer in progress
+
+---
+
+# 🇬🇧 Current Data Sources
+
+| Source | Purpose | Status |
+|---|---|---|
+| Food.com | Recipes & user reviews | Silver ready |
+| EUFIC | Fruit & vegetable seasonality | Silver ready |
+| FAOSTAT | Global agricultural production | Silver ready |
+
+---
+
+# 🇬🇧 Current Features
+
+- Data extraction pipelines
+- Bronze/Silver transformation pipelines
+- NLP preprocessing
+- Parquet exports
+- CSV sample exports
+- Modular architecture
+
+---
+
+# 🇬🇧 Planned Gold Metrics (V1)
+
+Version 1 includes a first analytical Gold layer with business-oriented metrics.
+
+Examples:
+- recipe popularity score,
+- user satisfaction score,
+- ingredient count,
+- total preparation time,
+- complexity score,
+- seasonality score,
+- agricultural availability indicators.
+
+---
+
+# 🇬🇧 Tech Stack
+
+## Data Engineering
+- Python
+- Pandas
+- Parquet
+
+## Infrastructure
+- Docker
+- GitHub Actions
+
+## Technical Roadmap
+- Airflow
+- DuckDB
+- dbt
+- FastAPI
+- Streamlit
+- NLP / ML
+
+---
+
+# 🇬🇧 Project Structure
+
+```txt
+extract/     -> extraction pipelines
+transform/   -> Bronze/Silver/Gold transformations
+data/        -> Medallion layers
+tools/       -> utility scripts
+api/         -> API services
+app/         -> frontend application
+ml/          -> machine learning workflows
+nlp/         -> NLP pipelines
+```
+
+---
+
+# 🇬🇧 Roadmap
+
+## V1
+- Bronze/Silver pipelines
+- Food.com integration
+- EUFIC integration
+- FAOSTAT integration
+- First analytical Gold layer
+- Recipe and seasonality metrics
+
+## V2
+- Smart recommendation engine
+- FastAPI services
+- Streamlit dashboards
+- Advanced sustainability analytics
+- Advanced NLP and recommendation systems
+
+---
+
+# Vision
+
+YUMMY is not only a recipe application.
+
+The project aims to become a sustainable food intelligence platform combining:
+- data engineering,
+- analytics,
+- NLP,
+- food supply chain insights,
+- sustainability awareness.
