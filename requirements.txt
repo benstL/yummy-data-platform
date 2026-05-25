@@ -1,0 +1,9 @@
+pandas
+pyarrow
+fastparquet
+numpy
+requests
+beautifulsoup4
+lxml
+kaggle
+python-dotenv

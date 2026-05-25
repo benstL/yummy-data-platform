@@ -27,14 +27,17 @@ def clean_text(value):
 
     value = str(value).lower().strip()
 
-    value = re.sub(r"\s+", " ", value)
+    # Cas fréquent Food.com/R : c("blueberries", "sugar")
+    value = re.sub(r"^c\s*\(", "", value)
+    value = re.sub(r"\)$", "", value)
 
-    value = value.translate(
-        str.maketrans("", "", string.punctuation)
-    )
+    # Remplace la ponctuation par des espaces, au lieu de la supprimer
+    value = re.sub(rf"[{re.escape(string.punctuation)}]", " ", value)
+
+    # Nettoie les espaces multiples
+    value = re.sub(r"\s+", " ", value).strip()
 
     return value
-
 
 def iso8601_to_minutes(duration):
 

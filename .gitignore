@@ -1,12 +1,34 @@
+# Python
 __pycache__/
 *.pyc
+
+# Environments
 .env
 .venv/
+
+# IDE
 .vscode/
-data/
-*.parquet
-*.csv
+
+# Logs
 *.log
+
+# Airflow
 .airflow/
+
+# dbt
 dbt_packages/
 target/
+
+# Data heavy files
+data/bronze/
+data/silver/
+data/gold/
+
+# Ignore parquet
+*.parquet
+
+# Ignore generated previews
+data/preview/*.csv
+
+# Mac / Linux
+.DS_Store
