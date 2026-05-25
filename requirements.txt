@@ -7,3 +7,6 @@ beautifulsoup4
 lxml
 kaggle
 python-dotenv
+fastapi
+uvicorn
+streamlit
