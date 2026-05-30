@@ -554,7 +554,7 @@ Clustering k or features changed?  →  Step 4 only
 | Cas limite préfixe inverse dans le filtre morphologique | Le token `"bel"` passe le filtre vis-à-vis de `"bell pepper"` (diff de longueur = 1). Rare — aucun ingrédient courant ne s'abrège ainsi en anglais. Correction V2 : préfixe inverse en longueur exacte ou seuil relevé pour les tokens courts. | §4.3 |
 | 4 ID de recettes orphelins dans `gold_sentiment_scores` | ID `{424301, 371545, 432898, 194165}` ont des scores VADER mais `reviewcount == 0` dans les recettes Silver (incohérence des données sources). Exclus de `gold_yummy_recommendations`, jamais interrogés. Aucune action requise pour V1. | §3 |
 | `api/main.py` lit le parquet à chaque requête sans cache ni gestion d'erreurs | Latence accrue en charge ; parquet manquant → 500 non géré. Signalé au backlog de l'équipe API. Pas bloquant pour la démo — la démo utilise des lectures directes de parquets via Streamlit. | — |
-| Les scripts nécessitent une exécution depuis la racine du projet | Les chemins relatifs `Path("data/…")` échouent si les scripts sont exécutés depuis un sous-répertoire. Contrainte documentée dans `CLAUDE.md`. | §8 |
+| Les scripts nécessitent une exécution depuis la racine du projet | Les chemins relatifs `Path("data/…")` échouent si les scripts sont exécutés depuis un sous-répertoire. | §8 |
 
 #### Feuille de route V2
 
@@ -1166,7 +1166,7 @@ Clustering k or features changed?  →  Step 4 only
 | Reverse-prefix edge case in morphological guard | Token `"bel"` passes the guard vs `"bell pepper"` (len diff = 1). Rare — no common English ingredient abbreviates this way. V2 fix: tighten reverse-prefix to exact-length or raise threshold for short tokens. | §4.3 |
 | 4 orphan recipe IDs in `gold_sentiment_scores` | IDs `{424301, 371545, 432898, 194165}` have VADER scores but `reviewcount == 0` in Silver recipes (source-data inconsistency). They are excluded from `gold_yummy_recommendations` and never surface in any query. No action needed for V1. | §3 |
 | `api/main.py` reads parquet on every request with no cache or error handling | Latency increases under load; missing parquet returns unhandled 500. Flagged for the API team's backlog. Not a demo blocker — the demo uses direct parquet reads via Streamlit. | — |
-| Scripts require project-root execution | Relative `Path("data/…")` paths fail if scripts are run from a subdirectory. Documented constraint in `CLAUDE.md`. | §8 |
+| Scripts require project-root execution | Relative `Path("data/…")` paths fail if scripts are run from a subdirectory. | §8 |
 
 ### V2 roadmap
 
