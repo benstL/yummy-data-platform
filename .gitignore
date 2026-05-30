@@ -32,3 +32,19 @@ data/preview/*.csv
 
 # Mac / Linux
 .DS_Store
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Streamlit secrets (config.toml stays committed, secrets do not)
+.streamlit/secrets.toml
+
+# Test venvs
+.venv_test/
+
+# Python build artifacts
+*.egg-info/
+build/
+dist/

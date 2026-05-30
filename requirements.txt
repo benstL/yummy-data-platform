@@ -1,12 +1,27 @@
-pandas
-pyarrow
-fastparquet
-numpy
-requests
-beautifulsoup4
-lxml
-kaggle
-python-dotenv
-fastapi
-uvicorn
-streamlit
+# --- Data engineering ---
+pandas==3.0.3
+numpy==2.4.6
+pyarrow==24.0.0
+fastparquet==2026.5.0
+
+# --- ML / NLP ---
+scikit-learn==1.8.0
+vaderSentiment==3.3.2
+
+# --- Extraction ---
+requests==2.34.2
+beautifulsoup4==4.14.3
+lxml==6.1.1
+kaggle==2.2.0
+selenium==4.44.0
+python-dotenv==1.2.2
+
+# --- API ---
+fastapi==0.136.3
+uvicorn==0.48.0
+
+# --- Frontend ---
+streamlit==1.58.0
+
+# --- Tests ---
+pytest==9.0.3
