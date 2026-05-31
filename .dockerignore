@@ -1,0 +1,7 @@
+data/bronze/
+data/silver/
+__pycache__/
+.venv/
+*.pyc
+.pytest_cache/
+.git/
