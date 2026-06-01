@@ -1,0 +1,125 @@
+version: 2
+
+models:
+
+  - name: stg_recipes
+    description: >
+      Staging view over the latest Silver Food.com recipes parquet on MinIO
+      (s3://yummy/silver/foodcom/silver_recipes_*.parquet).
+      Zero-review recipes (247,489) are excluded to align with the Python Gold filter.
+    columns:
+      - name: recipeid
+        description: "Unique recipe identifier."
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: "Recipe title."
+        tests:
+          - not_null
+      - name: recipecategory
+        description: "Broad category label from Food.com (e.g. Dessert, Main Dish)."
+      - name: recipeingredientparts
+        description: "Ingredient list as a single string in Food.com R-list format."
+      - name: recipeinstructions
+        description: "Step-by-step cooking instructions."
+      - name: aggregatedrating
+        description: "Mean star rating [1, 5] aggregated across all reviews."
+      - name: reviewcount
+        description: "Number of reviews. Always ≥ 1 after the zero-review filter applied here."
+        tests:
+          - not_null
+      - name: totaltime
+        description: >
+          Total cook time in integer minutes.
+          ISO-8601 durations (e.g. PT1H30M) are converted to minutes in the Silver transform.
+          NULL when the original recipe had no time field.
+
+  - name: stg_sentiment
+    description: >
+      Read-only staging view over gold_sentiment_scores.parquet on MinIO.
+      VADER scoring and percentile ranking run in Python (ml/sentiment/sentiment_analyzer.py,
+      Step 2). This model only exposes the two columns needed by yummy_recommendations.
+    columns:
+      - name: recipeid
+        description: "Recipe identifier. Foreign key to stg_recipes.recipeid."
+        tests:
+          - not_null
+          - unique
+      - name: sentiment_percentile
+        description: >
+          Percentile rank of mean VADER score across all 271,678 reviewed recipes [0, 100].
+          Recipes absent from this table receive 50.0 (neutral) in yummy_recommendations.
+
+  - name: yummy_recommendations
+    description: >
+      Gold table of YUMMY recipe recommendations.
+      Written to s3://yummy/gold/dbt_yummy_recommendations.parquet (distinct from the Python
+      pipeline output gold_yummy_recommendations.parquet so both versions coexist for comparison).
+      Reproduces the ml/README §6 formula in pure SQL:
+        yummy_score = (0.35 × weighted_rating_score
+                     + 0.25 × shrunk_sentiment/100
+                     + 0.20 × popularity_score
+                     + 0.20 × simplicity_score) × 100  [rounded 2 dp].
+      Rows with NULL totaltime carry NULL yummy_score (NULL propagation matches Python).
+    columns:
+      - name: recipeid
+        description: "Unique recipe identifier (primary key)."
+        tests:
+          - not_null
+          - unique
+      - name: name
+        description: "Recipe title."
+        tests:
+          - not_null
+      - name: recipecategory
+        description: "Broad recipe category."
+      - name: recipeingredientparts
+        description: "Raw ingredient list string."
+      - name: recipeinstructions
+        description: "Cooking instructions."
+      - name: totaltime
+        description: "Cook time in minutes. NULL when unknown; propagates to NULL yummy_score."
+      - name: ingredient_count
+        description: >
+          Count of whitespace-separated tokens in recipeingredientparts.
+          Computed with string_split_regex('\s+') to match Python str.split() semantics
+          (handles multi-space gaps; empty/NULL → 0).
+      - name: aggregatedrating
+        description: "Mean raw star rating [1, 5]."
+      - name: reviewcount
+        description: "Review count (always ≥ 1 after stg_recipes filter)."
+      - name: weighted_rating
+        description: >
+          Bayesian-shrunk star rating (IMDB formula): (v/(v+m))×R + (m/(v+m))×C.
+          C ≈ 4.5354 (global mean), m = 5.0 (p80 of reviewcount). Rounded to 4 dp.
+      - name: sentiment_percentile
+        description: >
+          Raw VADER percentile [0, 100] from stg_sentiment.
+          Defaults to 50.0 (neutral) for the 3,354 recipes absent from the sentiment table.
+      - name: shrunk_sentiment
+        description: >
+          Bayesian-shrunk sentiment: (v/(v+m))×percentile + (m/(v+m))×50.
+          Same shrinkage logic as weighted_rating; prior = 50 (uniform-distribution median).
+          Rounded to 2 dp.
+      - name: rating_score
+        description: >
+          Min-max normalised weighted_rating [0, 1].
+          Aliased as rating_score because ml/clustering/recipe_clusterer.py reads this
+          column name directly from the Gold parquet.
+      - name: popularity_score
+        description: "Min-max normalised reviewcount [0, 1]. The most-reviewed recipe scores 1.0."
+      - name: simplicity_score
+        description: >
+          1 − min-max normalised totaltime [0, 1]. Fastest recipe = 1.0, slowest = 0.0.
+          NULL when totaltime is NULL.
+      - name: yummy_score
+        description: >
+          Composite recommendation score [0, 100], rounded to 2 dp.
+          NULL when totaltime is NULL (simplicity_score cannot be computed).
+        tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 100
+      - name: processed_at
+        description: "UTC timestamp of the dbt run that produced this row."

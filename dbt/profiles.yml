@@ -1,0 +1,25 @@
+yummy:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+
+      # Local DuckDB file used for staging views and dbt metadata.
+      # The Gold parquet is written to MinIO (s3://yummy/gold/) via external
+      # materialization — no Gold data is stored in this file.
+      path: "target/yummy.duckdb"
+
+      # httpfs is installed + loaded automatically by dbt-duckdb for each connection.
+      extensions:
+        - httpfs
+
+      # S3 settings mirror tools/query_duckdb.py exactly.
+      # MinIO requires path-style URLs (no wildcard DNS on localhost) and plain HTTP.
+      settings:
+        s3_endpoint:          "{{ env_var('MINIO_ENDPOINT', 'localhost:9000') }}"
+        s3_access_key_id:     "{{ env_var('MINIO_ROOT_USER') }}"
+        s3_secret_access_key: "{{ env_var('MINIO_ROOT_PASSWORD') }}"
+        # String 'false' → DuckDB parses as boolean FALSE (SET s3_use_ssl = 'false').
+        s3_use_ssl:           "false"
+        # Path-style mandatory for MinIO — see tools/query_duckdb.py docstring.
+        s3_url_style:         "path"

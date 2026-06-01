@@ -47,4 +47,5 @@ htmlcov/
 # Python build artifacts
 *.egg-info/
 build/
-dist/
+dist/*:Zone.Identifier
+dbt/.user.yml

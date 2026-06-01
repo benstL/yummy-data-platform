@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .git/
+.env
+.venv*/
+data/tests/
+*.zip
+data/gold/
