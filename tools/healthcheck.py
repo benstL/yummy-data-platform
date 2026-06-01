@@ -142,7 +142,7 @@ def check_docker() -> bool:
     # ── api ────────────────────────────────────────────────────────────────────
     svc = containers.get("api")
     if svc and svc.get("State") == "running":
-        _pass(f"api           — running")
+        _pass("api           — running")
     else:
         state = svc.get("State", "absent") if svc else "absent"
         _fail(f"api           — état '{state}' (attendu: running)")
@@ -151,7 +151,7 @@ def check_docker() -> bool:
     # ── ui ────────────────────────────────────────────────────────────────────
     svc = containers.get("ui")
     if svc and svc.get("State") == "running":
-        _pass(f"ui            — running")
+        _pass("ui            — running")
     else:
         state = svc.get("State", "absent") if svc else "absent"
         _fail(f"ui            — état '{state}' (attendu: running)")
@@ -163,7 +163,7 @@ def check_docker() -> bool:
         # Le champ Health existe dans docker compose v2 ; Status contient aussi "(healthy)".
         health = svc.get("Health", "") or svc.get("Status", "")
         if "healthy" in health.lower():
-            _pass(f"minio         — running, healthy")
+            _pass("minio         — running, healthy")
         else:
             _fail(f"minio         — running mais pas healthy (Health/Status='{health}')")
             all_ok = False
@@ -179,7 +179,7 @@ def check_docker() -> bool:
     # FAIL uniquement si exited avec code ≠ 0 (échec d'initialisation).
     svc = containers.get("minio-init")
     if svc is None:
-        _pass(f"minio-init    — absent (nettoyé après exécution, bucket présumé créé)")
+        _pass("minio-init    — absent (nettoyé après exécution, bucket présumé créé)")
     else:
         state     = svc.get("State", "")
         exit_code = svc.get("ExitCode", -1)
@@ -343,7 +343,7 @@ def check_api() -> bool:
     try:
         r = requests.get(f"{API_BASE}/recommendations?limit=3", timeout=15)
     except requests.exceptions.ConnectionError:
-        _fail(f"GET /recommendations a perdu la connexion")
+        _fail("GET /recommendations a perdu la connexion")
         return False
 
     if r.status_code != 200:
@@ -456,7 +456,7 @@ def check_tests() -> bool:
         _info(line)
 
     if result.returncode == 0:
-        _pass(f"pytest -q → exit 0")
+        _pass("pytest -q → exit 0")
         return True
     else:
         _fail(f"pytest -q → exit {result.returncode}")

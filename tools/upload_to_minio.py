@@ -16,7 +16,6 @@ Layout S3 produit :
 """
 
 import os
-import sys
 from pathlib import Path
 
 import boto3
