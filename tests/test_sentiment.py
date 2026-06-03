@@ -2,7 +2,6 @@
 import sys
 
 import pandas as pd
-import pytest
 
 from ml.sentiment.sentiment_analyzer import aggregate_by_recipe, score_reviews
 

@@ -28,7 +28,7 @@ YUMMY vise à recommander des recettes selon :
 Le projet cherche également à sensibiliser aux enjeux :
 - de consommation saisonnière,
 - de supply chain alimentaire,
-- d’exploitation des données agricoles.
+- d'exploitation des données agricoles.
 
 ---
 
@@ -36,16 +36,13 @@ Le projet cherche également à sensibiliser aux enjeux :
 
 Le projet suit une architecture Medallion :
 
-| Couche | Description |
-|---|---|
-| Bronze | Données brutes extraites |
-| Silver | Données nettoyées et standardisées |
-| Gold | Données analytiques enrichies |
+| Couche | Description | Statut |
+|---|---|---|
+| Bronze | Données brutes extraites | ✅ Opérationnel |
+| Silver | Données nettoyées et standardisées | ✅ Opérationnel |
+| Gold | Données analytiques enrichies + score de recommandation | ✅ Implémentée |
 
-Statut actuel :
-- Pipelines Bronze opérationnels
-- Pipelines Silver opérationnels
-- Couche Gold en cours de développement
+La couche Gold est produite par deux chemins complémentaires : le pipeline Python (`transform/gold/`, `ml/`) et le pipeline SQL (`dbt/`). → Voir `ml/README.md` pour le détail de la formule et des métriques.
 
 ---
 
@@ -59,84 +56,92 @@ Statut actuel :
 
 ---
 
-# 🇫🇷 Fonctionnalités actuelles
+# 🇫🇷 Fonctionnalités implémentées
 
-- Extraction de données
-- Pipelines de transformation Bronze/Silver
-- Nettoyage NLP
-- Export Parquet
-- Export d’échantillons CSV
-- Architecture modulaire
+- Extraction de données (Kaggle, Selenium, FAO bulk)
+- Pipelines de transformation Bronze → Silver → Gold
+- Enrichissement ML : analyse de sentiment VADER, matching TF-IDF des ingrédients, clustering KMeans
+- Score de recommandation `yummy_score` (pipeline Python et pipeline dbt SQL)
+- API FastAPI — `GET /recommendations`
+- Interface Streamlit — sélection pays/saison, filtres cluster
+- Object store MinIO avec pipeline dbt-duckdb (couche SQL sur Silver)
+- CI/CD GitHub Actions (Python 3.12, pytest, ruff)
+- Audit d'intégration bout en bout — `tools/healthcheck.py`
 
 ---
 
-# 🇫🇷 Métriques Gold prévues (V1)
+# 🇫🇷 Métriques Gold V1 — implémentées
 
-La V1 du projet prévoit l’implémentation d’une première couche analytique Gold avec des métriques métier.
+La couche Gold calcule un `yummy_score` composite [0–100] à partir de quatre composantes :
 
-Exemples de métriques :
-- score de popularité recette,
-- score de satisfaction utilisateur,
-- nombre d’ingrédients,
-- temps de préparation total,
-- score de complexité,
-- score de saisonnalité,
-- indicateurs de disponibilité agricole.
+| Composante | Poids | Description |
+|---|---|---|
+| `weighted_rating_score` | 35 % | Note Bayésienne (formule IMDB) |
+| `shrunk_sentiment` | 25 % | Percentile VADER avec rétrécissement Bayésien |
+| `popularity_score` | 20 % | Nombre d'avis normalisé |
+| `simplicity_score` | 20 % | Inverse du temps de préparation normalisé |
+
+→ Formule complète, paramètres et exemple chiffré : `ml/README.md §6`.
 
 ---
 
 # 🇫🇷 Stack technique
 
-## Data Engineering
-- Python
-- Pandas
-- Parquet
+## Implémenté
 
-## Infrastructure
-- Docker
-- GitHub Actions
+| Domaine | Technologies |
+|---|---|
+| Data engineering | Python 3.12, Pandas, PyArrow, Parquet |
+| ML / NLP | scikit-learn, vaderSentiment, TF-IDF, KMeans |
+| Infrastructure | Docker, docker-compose, MinIO (S3-compatible) |
+| Couche SQL | DuckDB, dbt-duckdb |
+| API | FastAPI, uvicorn |
+| Frontend | Streamlit |
+| CI/CD | GitHub Actions (push + pull request) |
 
-## Roadmap technique
-- Airflow
-- DuckDB
-- dbt
-- FastAPI
-- Streamlit
-- NLP / ML
+## Restant
+
+| Domaine | Technologies |
+|---|---|
+| Orchestration | Apache Airflow |
+| Observabilité | À définir |
+
+→ Détail infra (Docker, MinIO, DuckDB, dbt, CI) : `docs/INFRA.md`.
 
 ---
 
 # 🇫🇷 Structure du projet
 
-```txt
-extract/     -> pipelines d’extraction
-transform/   -> transformations Bronze/Silver/Gold
-data/        -> couches Medallion
-tools/       -> scripts utilitaires
-api/         -> services API
-app/         -> application frontend
-ml/          -> workflows machine learning
-nlp/         -> pipelines NLP
+```
+extract/     -> pipelines d'extraction (Kaggle, Selenium, FAO)
+transform/   -> transformations Bronze → Silver → Gold
+ml/          -> enrichissement ML (sentiment, matching, clustering)
+dbt/         -> pipeline SQL Gold (dbt-duckdb sur MinIO)
+api/         -> service FastAPI
+app/         -> interface Streamlit
+tools/       -> scripts utilitaires (upload MinIO, DuckDB, healthcheck…)
+tests/       -> tests pytest + génération de fixtures
+docs/        -> documentation technique interne
+data/        -> couches Medallion (gitignorées)
 ```
 
 ---
 
 # 🇫🇷 Roadmap
 
-## V1
-- Pipelines Bronze/Silver
-- Intégration Food.com
-- Intégration EUFIC
-- Intégration FAOSTAT
-- Première couche Gold analytique
-- Métriques recettes et saisonnalité
+## ✅ Fait
 
-## V2
-- Recommandation intelligente
-- API FastAPI
-- Dashboard Streamlit
-- Analyse avancée de durabilité alimentaire
-- NLP avancé et moteurs de recommandation
+- Pipelines Bronze/Silver (Food.com, EUFIC, FAOSTAT)
+- Couche Gold analytique avec `yummy_score`
+- Enrichissement ML (VADER, TF-IDF, KMeans)
+- API FastAPI et interface Streamlit
+- Infrastructure Docker + MinIO + DuckDB + dbt
+- CI/CD GitHub Actions
+
+## 🔜 Restant
+
+- Orchestration Airflow (pipeline automatisé Bronze → Silver → Gold → MinIO)
+- Observabilité (métriques, alertes)
 
 ---
 
@@ -173,16 +178,13 @@ The platform also promotes awareness around:
 
 YUMMY follows a Medallion Architecture approach:
 
-| Layer | Description |
-|---|---|
-| Bronze | Raw extracted datasets |
-| Silver | Cleaned and standardized datasets |
-| Gold | Enriched analytical datasets |
+| Layer | Description | Status |
+|---|---|---|
+| Bronze | Raw extracted datasets | ✅ Implemented |
+| Silver | Cleaned and standardized datasets | ✅ Implemented |
+| Gold | Enriched analytical datasets + recommendation score | ✅ Implemented |
 
-Current status:
-- Bronze pipelines implemented
-- Silver pipelines implemented
-- Gold layer in progress
+The Gold layer is produced by two complementary pipelines: the Python pipeline (`transform/gold/`, `ml/`) and the SQL pipeline (`dbt/`). → See `ml/README.md` for formula details and metrics.
 
 ---
 
@@ -196,84 +198,92 @@ Current status:
 
 ---
 
-# EN Current Features
+# EN Implemented Features
 
-- Data extraction pipelines
-- Bronze/Silver transformation pipelines
-- NLP preprocessing
-- Parquet exports
-- CSV sample exports
-- Modular architecture
+- Data extraction pipelines (Kaggle, Selenium, FAO bulk)
+- Bronze → Silver → Gold transformation pipelines
+- ML enrichment: VADER sentiment analysis, TF-IDF ingredient matching, KMeans clustering
+- `yummy_score` recommendation score (Python pipeline and dbt SQL pipeline)
+- FastAPI service — `GET /recommendations`
+- Streamlit UI — country/season selection, cluster filters
+- MinIO object store with dbt-duckdb SQL layer (Gold over Silver)
+- CI/CD with GitHub Actions (Python 3.12, pytest, ruff)
+- End-to-end integration audit — `tools/healthcheck.py`
 
 ---
 
-# EN Planned Gold Metrics (V1)
+# EN Gold Metrics V1 — Implemented
 
-Version 1 includes a first analytical Gold layer with business-oriented metrics.
+The Gold layer computes a composite `yummy_score` [0–100] from four components:
 
-Examples:
-- recipe popularity score,
-- user satisfaction score,
-- ingredient count,
-- total preparation time,
-- complexity score,
-- seasonality score,
-- agricultural availability indicators.
+| Component | Weight | Description |
+|---|---|---|
+| `weighted_rating_score` | 35 % | Bayesian weighted rating (IMDB formula) |
+| `shrunk_sentiment` | 25 % | VADER percentile with Bayesian shrinkage |
+| `popularity_score` | 20 % | Normalised review count |
+| `simplicity_score` | 20 % | Inverse of normalised cook time |
+
+→ Full formula, parameters, and worked example: `ml/README.md §6`.
 
 ---
 
 # EN Tech Stack
 
-## Data Engineering
-- Python
-- Pandas
-- Parquet
+## Implemented
 
-## Infrastructure
-- Docker
-- GitHub Actions
+| Domain | Technologies |
+|---|---|
+| Data engineering | Python 3.12, Pandas, PyArrow, Parquet |
+| ML / NLP | scikit-learn, vaderSentiment, TF-IDF, KMeans |
+| Infrastructure | Docker, docker-compose, MinIO (S3-compatible) |
+| SQL layer | DuckDB, dbt-duckdb |
+| API | FastAPI, uvicorn |
+| Frontend | Streamlit |
+| CI/CD | GitHub Actions (push + pull request) |
 
-## Technical Roadmap
-- Airflow
-- DuckDB
-- dbt
-- FastAPI
-- Streamlit
-- NLP / ML
+## Remaining
+
+| Domain | Technologies |
+|---|---|
+| Orchestration | Apache Airflow |
+| Observability | To be defined |
+
+→ Infrastructure detail (Docker, MinIO, DuckDB, dbt, CI): `docs/INFRA.md`.
 
 ---
 
 # EN Project Structure
 
-```txt
-extract/     -> extraction pipelines
-transform/   -> Bronze/Silver/Gold transformations
-data/        -> Medallion layers
-tools/       -> utility scripts
-api/         -> API services
-app/         -> frontend application
-ml/          -> machine learning workflows
-nlp/         -> NLP pipelines
+```
+extract/     -> extraction pipelines (Kaggle, Selenium, FAO)
+transform/   -> Bronze → Silver → Gold transformations
+ml/          -> ML enrichment (sentiment, matching, clustering)
+dbt/         -> SQL Gold pipeline (dbt-duckdb on MinIO)
+api/         -> FastAPI service
+app/         -> Streamlit frontend
+tools/       -> utility scripts (MinIO upload, DuckDB, healthcheck…)
+tests/       -> pytest tests and fixture generation
+docs/        -> internal technical documentation
+data/        -> Medallion layers (gitignored)
 ```
 
 ---
 
 # EN Roadmap
 
-## V1
-- Bronze/Silver pipelines
-- Food.com integration
-- EUFIC integration
-- FAOSTAT integration
-- First analytical Gold layer
-- Recipe and seasonality metrics
+## ✅ Done
 
-## V2
-- Smart recommendation engine
-- FastAPI services
-- Streamlit dashboards
-- Advanced sustainability analytics
-- Advanced NLP and recommendation systems
+- Bronze/Silver pipelines (Food.com, EUFIC, FAOSTAT)
+- Gold analytical layer with `yummy_score`
+- ML enrichment (VADER, TF-IDF, KMeans)
+- FastAPI service and Streamlit UI
+- Docker + MinIO + DuckDB + dbt infrastructure
+- CI/CD with GitHub Actions
+
+## 🔜 Remaining
+
+- Airflow orchestration (automated pipeline Bronze → Silver → Gold → MinIO)
+- Observability (metrics, alerting)
 
 ---
 
