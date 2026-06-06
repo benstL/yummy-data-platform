@@ -67,6 +67,7 @@ La couche Gold est produite par deux chemins complémentaires : le pipeline Pyth
 - Object store MinIO avec pipeline dbt-duckdb (couche SQL sur Silver)
 - CI/CD GitHub Actions (Python 3.12, pytest, ruff)
 - Audit d'intégration bout en bout — `tools/healthcheck.py`
+- Orchestration Airflow — DAG `yummy_pipeline` (Silver → Gold, @daily)
 
 ---
 
@@ -98,12 +99,12 @@ La couche Gold calcule un `yummy_score` composite [0–100] à partir de quatre 
 | API | FastAPI, uvicorn |
 | Frontend | Streamlit |
 | CI/CD | GitHub Actions (push + pull request) |
+| Orchestration | Apache Airflow |
 
 ## Restant
 
 | Domaine | Technologies |
 |---|---|
-| Orchestration | Apache Airflow |
 | Observabilité | À définir |
 
 → Détail infra (Docker, MinIO, DuckDB, dbt, CI) : `docs/INFRA.md`.
@@ -122,6 +123,7 @@ app/         -> interface Streamlit
 tools/       -> scripts utilitaires (upload MinIO, DuckDB, healthcheck…)
 tests/       -> tests pytest + génération de fixtures
 docs/        -> documentation technique interne
+dags/        -> DAGs Airflow
 data/        -> couches Medallion (gitignorées)
 ```
 
@@ -137,10 +139,10 @@ data/        -> couches Medallion (gitignorées)
 - API FastAPI et interface Streamlit
 - Infrastructure Docker + MinIO + DuckDB + dbt
 - CI/CD GitHub Actions
+- Orchestration Airflow (DAG `yummy_pipeline`, Silver → Gold, @daily)
 
 ## 🔜 Restant
 
-- Orchestration Airflow (pipeline automatisé Bronze → Silver → Gold → MinIO)
 - Observabilité (métriques, alertes)
 
 ---
@@ -209,6 +211,7 @@ The Gold layer is produced by two complementary pipelines: the Python pipeline (
 - MinIO object store with dbt-duckdb SQL layer (Gold over Silver)
 - CI/CD with GitHub Actions (Python 3.12, pytest, ruff)
 - End-to-end integration audit — `tools/healthcheck.py`
+- Airflow orchestration — DAG `yummy_pipeline` (Silver → Gold, @daily)
 
 ---
 
@@ -240,12 +243,12 @@ The Gold layer computes a composite `yummy_score` [0–100] from four components
 | API | FastAPI, uvicorn |
 | Frontend | Streamlit |
 | CI/CD | GitHub Actions (push + pull request) |
+| Orchestration | Apache Airflow |
 
 ## Remaining
 
 | Domain | Technologies |
 |---|---|
-| Orchestration | Apache Airflow |
 | Observability | To be defined |
 
 → Infrastructure detail (Docker, MinIO, DuckDB, dbt, CI): `docs/INFRA.md`.
@@ -264,6 +267,7 @@ app/         -> Streamlit frontend
 tools/       -> utility scripts (MinIO upload, DuckDB, healthcheck…)
 tests/       -> pytest tests and fixture generation
 docs/        -> internal technical documentation
+dags/        -> Airflow DAGs
 data/        -> Medallion layers (gitignored)
 ```
 
@@ -279,10 +283,10 @@ data/        -> Medallion layers (gitignored)
 - FastAPI service and Streamlit UI
 - Docker + MinIO + DuckDB + dbt infrastructure
 - CI/CD with GitHub Actions
+- Airflow orchestration (DAG `yummy_pipeline`, Silver → Gold, @daily)
 
 ## 🔜 Remaining
 
-- Airflow orchestration (automated pipeline Bronze → Silver → Gold → MinIO)
 - Observability (metrics, alerting)
 
 ---

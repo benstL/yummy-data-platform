@@ -1,4 +1,23 @@
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.1
+  user: "${AIRFLOW_UID:-50000}:0"
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs/airflow:/opt/airflow/logs
+    - .:/opt/airflow/project
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+
 services:
+
+  # ─── API & UI ────────────────────────────────────────────────
   api:
     build: .
     image: yummy-app
@@ -18,6 +37,7 @@ services:
     depends_on:
       - api
 
+  # ─── MinIO ───────────────────────────────────────────────────
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"
@@ -48,5 +68,44 @@ services:
       echo '[INFO] Bucket yummy ready.'
       "
 
+  # ─── Airflow ─────────────────────────────────────────────────
+  airflow-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  airflow-init:
+    <<: *airflow-common
+    command: >-
+      bash -c "airflow db migrate && airflow users create --username admin --password admin --firstname Yummy --lastname Admin --role Admin --email admin@yummy.local"
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: always
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: always
+
 volumes:
   minio_data:
+  airflow-db-data:
