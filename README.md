@@ -67,7 +67,7 @@ La couche Gold est produite par deux chemins complémentaires : le pipeline Pyth
 - Object store MinIO avec pipeline dbt-duckdb (couche SQL sur Silver)
 - CI/CD GitHub Actions (Python 3.12, pytest, ruff)
 - Audit d'intégration bout en bout — `tools/healthcheck.py`
-- Orchestration Airflow — DAG `yummy_pipeline` (Silver → Gold, @daily)
+- Orchestration Airflow — DAG `yummy_pipeline` (Silver → Gold → upload MinIO, @daily)
 
 ---
 
@@ -139,7 +139,7 @@ data/        -> couches Medallion (gitignorées)
 - API FastAPI et interface Streamlit
 - Infrastructure Docker + MinIO + DuckDB + dbt
 - CI/CD GitHub Actions
-- Orchestration Airflow (DAG `yummy_pipeline`, Silver → Gold, @daily)
+- Orchestration Airflow (DAG `yummy_pipeline`, Silver → Gold → upload MinIO, @daily)
 
 ## 🔜 Restant
 
@@ -211,7 +211,7 @@ The Gold layer is produced by two complementary pipelines: the Python pipeline (
 - MinIO object store with dbt-duckdb SQL layer (Gold over Silver)
 - CI/CD with GitHub Actions (Python 3.12, pytest, ruff)
 - End-to-end integration audit — `tools/healthcheck.py`
-- Airflow orchestration — DAG `yummy_pipeline` (Silver → Gold, @daily)
+- Airflow orchestration — DAG `yummy_pipeline` (Silver → Gold → upload MinIO, @daily)
 
 ---
 
@@ -283,7 +283,7 @@ data/        -> Medallion layers (gitignored)
 - FastAPI service and Streamlit UI
 - Docker + MinIO + DuckDB + dbt infrastructure
 - CI/CD with GitHub Actions
-- Airflow orchestration (DAG `yummy_pipeline`, Silver → Gold, @daily)
+- Airflow orchestration (DAG `yummy_pipeline`, Silver → Gold → upload MinIO, @daily)
 
 ## 🔜 Remaining
 

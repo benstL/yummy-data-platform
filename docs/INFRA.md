@@ -110,7 +110,7 @@ tools/query_duckdb.py        (vérifie la lecture DuckDB ← MinIO)
          ▼
 API FastAPI  localhost:8000   (lit data/gold/ via volume Docker)
 UI Streamlit localhost:8501   (lit data/gold/ + data/silver/ via volume Docker)
-Airflow      localhost:8080   (orchestre build_silver → build_gold via DAG yummy_pipeline @daily)
+Airflow      localhost:8080   (orchestre build_silver → build_gold → upload_to_minio via DAG yummy_pipeline @daily)
 ```
 
 ### 2.2 Contrat de stockage MinIO
@@ -244,6 +244,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    MINIO_ENDPOINT: "minio:9000"           # réseau interne Docker — pas localhost
+    MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+    MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs/airflow:/opt/airflow/logs   # bind-mount — doit être accessible par AIRFLOW_UID
@@ -257,7 +260,7 @@ x-airflow-common: &airflow-common
 
 **Volume projet :** le bind-mount `.:/opt/airflow/project` expose l'intégralité du projet dans les conteneurs. Les BashOperators appellent `cd /opt/airflow/project && python …`.
 
-**Note MinIO depuis Airflow :** depuis un conteneur Airflow, MinIO est accessible via `http://minio:9000` (réseau interne Docker), pas `http://localhost:9000` — voir §7.2.
+**Credentials MinIO dans Airflow :** `MINIO_ENDPOINT=minio:9000`, `MINIO_ROOT_USER` et `MINIO_ROOT_PASSWORD` sont injectés dans les 4 conteneurs Airflow via l'ancre. `tools/upload_to_minio.py` lit `MINIO_ENDPOINT` par `os.environ.get()` — la valeur `minio:9000` prend la priorité sur le fallback `localhost:9000` et sur le `.env` de l'hôte (qui contient `localhost:9000` pour l'usage local). `boto3` est disponible nativement dans `apache/airflow:2.9.1`, aucune installation supplémentaire n'est nécessaire.
 
 ### 3.7 DAG `yummy_pipeline`
 
@@ -266,7 +269,7 @@ Fichier : `dags/yummy_pipeline.py`
 | Attribut | Valeur |
 |---|---|
 | `dag_id` | `yummy_pipeline` |
-| `schedule_interval` | `@daily` (minuit UTC) |
+| `schedule` | `@daily` (minuit UTC) |
 | `catchup` | `False` — pas de runs rétroactifs |
 | `retries` | 1, délai 5 min |
 
@@ -276,9 +279,9 @@ Fichier : `dags/yummy_pipeline.py`
 |---|---|---|
 | `build_silver` | `tools/build_all_silver.py` | Parquets Silver (FoodCom + EUFIC + FAOSTAT) dans `data/silver/` |
 | `build_gold` | `transform/gold/build_gold_yummy_recommendations.py` | `data/gold/gold_yummy_recommendations.parquet` |
-| `upload_to_minio` | `tools/upload_to_minio.py` | **(commenté)** Upload vers `s3://yummy/` — prêt à activer maintenant que MinIO est dans le compose. Décommenter dans `dags/yummy_pipeline.py`. |
+| `upload_to_minio` | `tools/upload_to_minio.py` | Pousse les 3 layers (bronze, silver, gold) vers `s3://yummy/` — dont les 6 fichiers Gold dans `s3://yummy/gold/` (`gold_yummy_recommendations`, `gold_sentiment_scores`, `gold_ingredient_matches`, `gold_recipe_ingredient_map`, `gold_recipe_clusters`, `gold_cluster_profiles`) |
 
-**Graphe d'exécution actif :** `build_silver >> build_gold`
+**Graphe d'exécution actif :** `build_silver >> build_gold >> upload_to_minio`
 
 **Accès à l'UI Airflow :**
 
@@ -487,7 +490,7 @@ MinIO est accessible sur **deux URLs différentes selon le contexte** :
 | Hôte WSL (scripts Python, navigateur) | `http://localhost:9000` | Port-forward Docker `9000:9000` |
 | Depuis un conteneur (futur Airflow, etc.) | `http://minio:9000` | Réseau interne Docker, nom DNS = nom du service |
 
-Les scripts `tools/upload_to_minio.py`, `tools/query_duckdb.py`, et `dbt/profiles.yml` lisent `MINIO_ENDPOINT` depuis l'environnement (défaut : `localhost:9000`). Un worker Airflow tournant en conteneur Docker devra surcharger cette variable à `minio:9000`.
+Les scripts `tools/upload_to_minio.py`, `tools/query_duckdb.py`, et `dbt/profiles.yml` lisent `MINIO_ENDPOINT` depuis l'environnement (défaut : `localhost:9000`). Les conteneurs Airflow surchargent cette variable à `minio:9000` via l'ancre `x-airflow-common` (voir §3.6).
 
 ### 7.3 Warning dbt — test `accepted_range`
 
@@ -530,3 +533,4 @@ Le workflow GitHub Actions ne configure aucun `cache: 'pip'` sur l'étape `setup
 | Streamlit `FileNotFoundError` au chargement | Parquet Silver ou Gold absent dans `./data/` | Vérifier `./data/gold/` et `./data/silver/`. Le volume `:ro` ne crée pas les fichiers — il monte ce qui existe sur l'hôte |
 | `airflow-init` échoue avec `PermissionError: /opt/airflow/logs/scheduler` | Le bind-mount `./logs/airflow` appartient à `root` sur l'hôte, mais les conteneurs Airflow tournent sous un UID non-root | `user: "${AIRFLOW_UID:-50000}:0"` est déjà dans `x-airflow-common`. S'assurer que `AIRFLOW_UID=$(id -u)` est défini dans `.env`. Si le problème persiste : `sudo chown -R $(id -u):0 logs/airflow` depuis la racine du projet |
 | Tâche Airflow échoue avec `ModuleNotFoundError: No module named 'pandas'` (ou `pyarrow`) | `pandas`/`pyarrow` absents de l'image `apache/airflow:2.9.1` telle qu'installée | Vérifier : `docker compose exec airflow-scheduler pip list \| grep -E "pandas\|pyarrow"`. Si absent : `docker compose exec airflow-scheduler pip install pandas pyarrow` (éphémère — perdu au redémarrage). Solution permanente : un `Dockerfile.airflow` étendant l'image avec `requirements.txt` du projet |
+| `mc alias set` échoue (credentials vides, `ERROR: Specified access credentials are invalid`) lors d'un test manuel | Les `${MINIO_ROOT_USER}` et `${MINIO_ROOT_PASSWORD}` de l'entrypoint `minio-init` sont interpolés par Docker Compose au déploiement (guillemets doubles). Si `.env` est absent ou incomplet, les valeurs sont vides et MinIO rejette la connexion. Pour tester manuellement depuis l'hôte, utiliser `sh -c '...'` (guillemets simples) pour que l'évaluation se fasse dans le shell du conteneur, où les vars d'env sont disponibles : `docker compose exec minio-init sh -c 'mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD'` — ou plus simplement vérifier que `.env` est présent avant `docker compose up` |
