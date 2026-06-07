@@ -1,6 +1,6 @@
 # INFRA — Pile technique YUMMY
 
-> **Mis à jour : 2026-06-01**
+> **Mis à jour : 2026-06-06**
 > Documentation technique interne. Public : membres de l'équipe qui n'ont pas codé cette partie.
 > Objectif : reproduire, dépanner, défendre en revue.
 > **Décrit l'état réel du code — jamais l'intention.**
@@ -11,7 +11,7 @@
 
 1. [Prérequis](#1-prérequis)
 2. [Architecture d'ensemble](#2-architecture-densemble)
-3. [Les 4 services docker-compose](#3-les-4-services-docker-compose)
+3. [Les 8 services docker-compose](#3-les-8-services-docker-compose)
 4. [Séquence de démarrage complète](#4-séquence-de-démarrage-complète)
 5. [Audit d'intégration](#5-audit-dintégration)
 6. [Source de vérité Gold — deux chemins](#6-source-de-vérité-gold--deux-chemins)
@@ -76,7 +76,7 @@ Sources externes
          ▼
 data/bronze/                 (CSV/ZIP bruts, date-partitionnés, gitignorés)
          │
-         ▼ transform/
+         ▼ transform/  ← DAG yummy_pipeline (tâche build_silver)
 data/silver/                 (Parquets nettoyés, gitignorés)
   ├─ foodcom/silver_recipes_YYYYMMDD.parquet
   ├─ foodcom/silver_reviews_YYYYMMDD.parquet
@@ -91,7 +91,7 @@ MinIO s3://yummy/            (object store local, port 9000)
          │
          ├─── chemin Python ──────────────────────────────────────────────────┐
          │    ml/sentiment + ml/matching                                       │
-         │    transform/gold/build_gold_yummy_recommendations.py              │
+         │    transform/gold/build_gold_yummy_recommendations.py  ← DAG yummy_pipeline (tâche build_gold)  │
          │         │                                                           │
          │         ▼                                                           │
          │    data/gold/gold_yummy_recommendations.parquet  (local, gitignored)│
@@ -110,6 +110,7 @@ tools/query_duckdb.py        (vérifie la lecture DuckDB ← MinIO)
          ▼
 API FastAPI  localhost:8000   (lit data/gold/ via volume Docker)
 UI Streamlit localhost:8501   (lit data/gold/ + data/silver/ via volume Docker)
+Airflow      localhost:8080   (orchestre build_silver → build_gold → upload_to_minio via DAG yummy_pipeline @daily)
 ```
 
 ### 2.2 Contrat de stockage MinIO
@@ -130,14 +131,14 @@ Le bucket `yummy` est la seule source de vérité pour la couche objet. Les chem
 
 ---
 
-## 3. Les 4 services docker-compose
+## 3. Les 8 services docker-compose
 
 ### 3.1 Vue d'ensemble
 
 ```yaml
-# docker-compose.yml — 4 services, 1 volume nommé
-services: api | ui | minio | minio-init
-volumes:  minio_data
+# docker-compose.yml — 8 services, 2 volumes nommés
+services: api | ui | minio | minio-init | airflow-db | airflow-init | airflow-webserver | airflow-scheduler
+volumes:  minio_data | airflow-db-data
 ```
 
 | Service | Image | Ports | Rôle |
@@ -146,6 +147,10 @@ volumes:  minio_data
 | `ui` | `yummy-app` (réutilisée, pas rebuildie) | `8501:8501` | Streamlit — interface utilisateur |
 | `minio` | `minio/minio` (officielle) | `9000:9000` (S3 API), `9001:9001` (console web) | Object store S3-compatible |
 | `minio-init` | `minio/mc` (officielle) | — | Tâche ponctuelle : crée le bucket `yummy` |
+| `airflow-db` | `postgres:15` | — (interne) | PostgreSQL de métadonnées Airflow |
+| `airflow-init` | `apache/airflow:2.9.1` | — | `db migrate` + création du user `admin` — tâche ponctuelle (exit 0) |
+| `airflow-webserver` | `apache/airflow:2.9.1` | `8080:8080` | Interface web Airflow |
+| `airflow-scheduler` | `apache/airflow:2.9.1` | — | Daemon d'ordonnancement des tâches |
 
 ### 3.2 Service `api`
 
@@ -226,6 +231,73 @@ minio-init:
 `minio-init` est une **tâche ponctuelle** : elle crée le bucket `yummy` une seule fois puis s'arrête avec exit code 0. C'est l'état attendu dans `docker compose ps`. `--ignore-existing` rend la tâche idempotente — relancer la pile ne provoque pas d'erreur si le bucket existe déjà.
 
 Attention : `http://minio:9000` est l'URL **inter-conteneur** (réseau interne Docker). Depuis l'hôte WSL, l'URL est `http://localhost:9000`. Voir §7 Limites connues.
+
+### 3.6 Services Airflow
+
+Les 4 services partagent la même configuration de base via l'ancre YAML `x-airflow-common` :
+
+```yaml
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.1
+  user: "${AIRFLOW_UID:-50000}:0"          # UID hôte — évite les PermissionError sur ./logs/
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    MINIO_ENDPOINT: "minio:9000"           # réseau interne Docker — pas localhost
+    MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+    MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs/airflow:/opt/airflow/logs   # bind-mount — doit être accessible par AIRFLOW_UID
+    - .:/opt/airflow/project             # projet entier monté — accès aux scripts Python
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+```
+
+**Ordre de démarrage :** `airflow-db` (healthcheck `pg_isready`) → `airflow-init` (`service_completed_successfully`) → `airflow-webserver` + `airflow-scheduler`
+
+**Volume projet :** le bind-mount `.:/opt/airflow/project` expose l'intégralité du projet dans les conteneurs. Les BashOperators appellent `cd /opt/airflow/project && python …`.
+
+**Credentials MinIO dans Airflow :** `MINIO_ENDPOINT=minio:9000`, `MINIO_ROOT_USER` et `MINIO_ROOT_PASSWORD` sont injectés dans les 4 conteneurs Airflow via l'ancre. `tools/upload_to_minio.py` lit `MINIO_ENDPOINT` par `os.environ.get()` — la valeur `minio:9000` prend la priorité sur le fallback `localhost:9000` et sur le `.env` de l'hôte (qui contient `localhost:9000` pour l'usage local). `boto3` est disponible nativement dans `apache/airflow:2.9.1`, aucune installation supplémentaire n'est nécessaire.
+
+### 3.7 DAG `yummy_pipeline`
+
+Fichier : `dags/yummy_pipeline.py`
+
+| Attribut | Valeur |
+|---|---|
+| `dag_id` | `yummy_pipeline` |
+| `schedule` | `@daily` (minuit UTC) |
+| `catchup` | `False` — pas de runs rétroactifs |
+| `retries` | 1, délai 5 min |
+
+**Tâches :**
+
+| Tâche | Script appelé | Ce qu'elle produit |
+|---|---|---|
+| `build_silver` | `tools/build_all_silver.py` | Parquets Silver (FoodCom + EUFIC + FAOSTAT) dans `data/silver/` |
+| `build_gold` | `transform/gold/build_gold_yummy_recommendations.py` | `data/gold/gold_yummy_recommendations.parquet` |
+| `upload_to_minio` | `tools/upload_to_minio.py` | Pousse les 3 layers (bronze, silver, gold) vers `s3://yummy/` — dont les 6 fichiers Gold dans `s3://yummy/gold/` (`gold_yummy_recommendations`, `gold_sentiment_scores`, `gold_ingredient_matches`, `gold_recipe_ingredient_map`, `gold_recipe_clusters`, `gold_cluster_profiles`) |
+
+**Graphe d'exécution actif :** `build_silver >> build_gold >> upload_to_minio`
+
+**Accès à l'UI Airflow :**
+
+```bash
+# La pile doit être démarrée : docker compose up -d
+# Ouvrir http://localhost:8080
+# Login : admin / admin  (créé par airflow-init)
+```
+
+Activer le DAG via le toggle dans la liste des DAGs, puis le déclencher manuellement avec le bouton *Trigger DAG* (▶).
+
+**Déclenchement via CLI :**
+
+```bash
+docker compose exec airflow-scheduler airflow dags trigger yummy_pipeline
+```
 
 ---
 
@@ -418,7 +490,7 @@ MinIO est accessible sur **deux URLs différentes selon le contexte** :
 | Hôte WSL (scripts Python, navigateur) | `http://localhost:9000` | Port-forward Docker `9000:9000` |
 | Depuis un conteneur (futur Airflow, etc.) | `http://minio:9000` | Réseau interne Docker, nom DNS = nom du service |
 
-Les scripts `tools/upload_to_minio.py`, `tools/query_duckdb.py`, et `dbt/profiles.yml` lisent `MINIO_ENDPOINT` depuis l'environnement (défaut : `localhost:9000`). Un worker Airflow tournant en conteneur Docker devra surcharger cette variable à `minio:9000`.
+Les scripts `tools/upload_to_minio.py`, `tools/query_duckdb.py`, et `dbt/profiles.yml` lisent `MINIO_ENDPOINT` depuis l'environnement (défaut : `localhost:9000`). Les conteneurs Airflow surchargent cette variable à `minio:9000` via l'ancre `x-airflow-common` (voir §3.6).
 
 ### 7.3 Warning dbt — test `accepted_range`
 
@@ -436,9 +508,6 @@ Le workflow GitHub Actions ne configure aucun `cache: 'pip'` sur l'étape `setup
 
 `depends_on: [api]` sur le service `ui` garantit l'**ordre de démarrage**, pas la disponibilité applicative. Sur machines lentes, Streamlit peut démarrer avant qu'uvicorn soit prêt — les premières requêtes inter-service échouent (non bloquant en pratique, l'UI ne passe pas par l'API).
 
-### 7.7 Orchestration Airflow non encore implémentée
-
-L'orchestration des pipelines (Silver → Gold → upload MinIO → dbt) par Apache Airflow est la **brique suivante** prévue mais non encore implémentée. La séquence de démarrage décrite en §4 est aujourd'hui manuelle. Les points d'attention pour l'intégration future sont documentés en §7.2 (endpoint `minio:9000` depuis un conteneur).
 
 ---
 
@@ -462,3 +531,6 @@ L'orchestration des pipelines (Silver → Gold → upload MinIO → dbt) par Apa
 | `pytest` exit code 4, message `Fixture files missing` | Fixtures de test non générées avant la session | `python tests/fixtures/generate_fixtures.py` puis `pytest -q`. `healthcheck.py` gère ce cas automatiquement |
 | `ruff: command not found` en local | ruff non installé dans le venv actif | `pip install ruff` (ruff n'est pas dans `requirements.txt`, il est installé séparément en CI) |
 | Streamlit `FileNotFoundError` au chargement | Parquet Silver ou Gold absent dans `./data/` | Vérifier `./data/gold/` et `./data/silver/`. Le volume `:ro` ne crée pas les fichiers — il monte ce qui existe sur l'hôte |
+| `airflow-init` échoue avec `PermissionError: /opt/airflow/logs/scheduler` | Le bind-mount `./logs/airflow` appartient à `root` sur l'hôte, mais les conteneurs Airflow tournent sous un UID non-root | `user: "${AIRFLOW_UID:-50000}:0"` est déjà dans `x-airflow-common`. S'assurer que `AIRFLOW_UID=$(id -u)` est défini dans `.env`. Si le problème persiste : `sudo chown -R $(id -u):0 logs/airflow` depuis la racine du projet |
+| Tâche Airflow échoue avec `ModuleNotFoundError: No module named 'pandas'` (ou `pyarrow`) | `pandas`/`pyarrow` absents de l'image `apache/airflow:2.9.1` telle qu'installée | Vérifier : `docker compose exec airflow-scheduler pip list \| grep -E "pandas\|pyarrow"`. Si absent : `docker compose exec airflow-scheduler pip install pandas pyarrow` (éphémère — perdu au redémarrage). Solution permanente : un `Dockerfile.airflow` étendant l'image avec `requirements.txt` du projet |
+| `mc alias set` échoue (credentials vides, `ERROR: Specified access credentials are invalid`) lors d'un test manuel | Les `${MINIO_ROOT_USER}` et `${MINIO_ROOT_PASSWORD}` de l'entrypoint `minio-init` sont interpolés par Docker Compose au déploiement (guillemets doubles). Si `.env` est absent ou incomplet, les valeurs sont vides et MinIO rejette la connexion. Pour tester manuellement depuis l'hôte, utiliser `sh -c '...'` (guillemets simples) pour que l'évaluation se fasse dans le shell du conteneur, où les vars d'env sont disponibles : `docker compose exec minio-init sh -c 'mc alias set local http://minio:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD'` — ou plus simplement vérifier que `.env` est présent avant `docker compose up` |

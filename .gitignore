@@ -47,5 +47,9 @@ htmlcov/
 # Python build artifacts
 *.egg-info/
 build/
-dist/*:Zone.Identifier
+dist/
+# Airflow
+logs/airflow/*
+!logs/airflow/.gitkeep
 dbt/.user.yml
+!logs/airflow/.gitkeep
