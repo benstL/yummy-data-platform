@@ -395,6 +395,55 @@ def build_recipe_map(
     return recipe_map
 
 
+def build_recipe_ingredient_matches(
+    recipes_df: pd.DataFrame,
+    matches_df: pd.DataFrame,
+) -> pd.DataFrame:
+
+    long = (
+        recipes_df[["recipeid", "recipeingredientparts"]]
+        .copy()
+        .assign(recipeingredientparts=lambda d: d["recipeingredientparts"].fillna(""))
+    )
+
+    long["ingredient_token"] = long["recipeingredientparts"].str.split()
+
+    long = (
+        long[["recipeid", "ingredient_token"]]
+        .explode("ingredient_token")
+        .dropna(subset=["ingredient_token"])
+    )
+
+    long["ingredient_token"] = long["ingredient_token"].astype(str)
+
+    keep = (
+        ~long["ingredient_token"].isin(STOPWORDS)
+        & ~long["ingredient_token"].str.isnumeric()
+        & (long["ingredient_token"].str.len() >= MIN_TOKEN_LEN)
+    )
+
+    long = long[keep].drop_duplicates(
+        subset=["recipeid", "ingredient_token"]
+    )
+
+    detailed = long.merge(
+        matches_df[
+            [
+                "ingredient_token",
+                "matched_term",
+                "source",
+                "similarity_score",
+            ]
+        ],
+        on="ingredient_token",
+        how="left",
+    )
+
+    detailed["source"] = detailed["source"].fillna("unmatched")
+
+    return detailed
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -446,13 +495,26 @@ def main() -> None:
     recipe_map_df = build_recipe_map(recipes_df, matches_df)
     recipe_map_df["processed_at"] = datetime.now(UTC).isoformat()
 
+    recipe_matches_df = build_recipe_ingredient_matches(
+        recipes_df,
+        matches_df,
+    )
+
+    recipe_matches_df["processed_at"] = datetime.now(UTC).isoformat()
+
     has_match = (
         (recipe_map_df["eufic_match_count"] + recipe_map_df["faostat_match_count"]) > 0
     ).sum()
+
+
     print(f"[INFO] Recipes with ≥1 match: {has_match:,} / {len(recipe_map_df):,}")
 
     save_gold(matches_df, "gold_ingredient_matches.parquet")
     save_gold(recipe_map_df, "gold_recipe_ingredient_map.parquet")
+    save_gold(
+    recipe_matches_df,
+    "gold_recipe_ingredient_matches.parquet"
+)
 
     print("[INFO] Ingredient matching completed.")
 

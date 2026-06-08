@@ -3,7 +3,7 @@
 
 ---
 
-# 🇫🇷 Présentation
+# 🇫 🇷 Présentation
 
 YUMMY est une plateforme data orientée analyse alimentaire durable, saisonnalité et supply chain agricole.
 
@@ -40,9 +40,40 @@ Le projet suit une architecture Medallion :
 |---|---|---|
 | Bronze | Données brutes extraites | ✅ Opérationnel |
 | Silver | Données nettoyées et standardisées | ✅ Opérationnel |
-| Gold | Données analytiques enrichies + score de recommandation | ✅ Implémentée |
+| Gold | Données analytiques enrichies + score de recommandation et de durabilité | ✅ Implémentée |
 
 La couche Gold est produite par deux chemins complémentaires : le pipeline Python (`transform/gold/`, `ml/`) et le pipeline SQL (`dbt/`). → Voir `ml/README.md` pour le détail de la formule et des métriques.
+
+---
+
+## 🇫🇷 API REST
+
+L'API FastAPI expose les données de la couche Gold.
+
+Principaux endpoints :
+
+| Endpoint | Description |
+|-----------|------------|
+| `GET /` | Vérification du service |
+| `GET /health` | Santé de l'API |
+| `GET /stats` | Statistiques globales |
+| `GET /recommendations` | Top recettes selon le Yummy Score |
+| `GET /durability` | Top recettes selon le Durability Score |
+| `GET /recipes-by-score` | Classement selon le score choisi |
+| `GET /recipe/{recipeid}` | Détail d'une recette |
+| `GET /quick-recipes` | Recettes rapides |
+| `GET /category/{category}` | Recettes d'une catégorie |
+
+Documentation interactive :
+
+Le fichier principal utilisé par l'API FastAPI est désormais :
+
+```text
+data/gold/gold_recipe_durability_scores.parquet
+
+```text
+http://localhost:8000/docs
+```
 
 ---
 
@@ -62,7 +93,15 @@ La couche Gold est produite par deux chemins complémentaires : le pipeline Pyth
 - Pipelines de transformation Bronze → Silver → Gold
 - Enrichissement ML : analyse de sentiment VADER, matching TF-IDF des ingrédients, clustering KMeans
 - Score de recommandation `yummy_score` (pipeline Python et pipeline dbt SQL)
-- API FastAPI — `GET /recommendations`
+- Score de durabilité basé sur la saisonnalité (EUFIC) et la disponibilité agricole (FAOSTAT)
+- API FastAPI :
+  - `GET /` : vérification du service
+  - `GET /health` : état de l'API et présence du fichier Gold
+  - `GET /stats` : statistiques globales du dataset
+  - `GET /recommendations` : meilleures recettes selon le Yummy Score
+  - `GET /recipe/{recipeid}` : détail d'une recette
+  - `GET /quick-recipes` : recettes rapides selon un temps maximum
+  - `GET /category/{category}` : recommandations par catégorie
 - Interface Streamlit — sélection pays/saison, filtres cluster
 - Object store MinIO avec pipeline dbt-duckdb (couche SQL sur Silver)
 - CI/CD GitHub Actions (Python 3.12, pytest, ruff)
@@ -85,6 +124,129 @@ La couche Gold calcule un `yummy_score` composite [0–100] à partir de quatre 
 → Formule complète, paramètres et exemple chiffré : `ml/README.md §6`.
 
 ---
+
+# 🇫🇷 Score de durabilité
+
+Afin de compléter le Yummy Score, un score de durabilité a été développé.
+
+Alors que le Yummy Score mesure principalement la satisfaction potentielle des utilisateurs, le score de durabilité cherche à évaluer la cohérence d'une recette avec la saisonnalité des ingrédients et leur disponibilité agricole.
+
+## Sources utilisées
+
+Le score repose sur deux sources de données :
+
+- EUFIC : données de saisonnalité des fruits et légumes selon le pays et le mois ;
+- FAOSTAT : statistiques de production agricole par pays.
+
+## Calcul du score
+
+### Étape 1 : score de l'ingrédient
+
+Pour chaque ingrédient reconnu :
+
+```text
+score_ingrédient = 75 % saisonnalité + 25 % disponibilité agricole
+```
+
+Un ingrédient :
+
+- de saison ;
+- et fortement produit dans le pays
+
+obtiendra un score élevé.
+
+Par exemple :
+
+| Produit | Saisonnalité | Disponibilité | Score |
+|----------|----------|----------|----------|
+| Tomate française en juillet | élevée | élevée | élevé |
+| Tomate française en janvier | faible | élevée | moyen |
+| Mangue en France | faible | faible | faible |
+
+### Étape 2 : score de durabilité de la recette
+
+Une fois le score calculé pour chaque ingrédient reconnu, le score de durabilité de la recette correspond à la moyenne des scores des ingrédients.
+
+```text
+score_recette = moyenne(score_ingrédient)
+```
+
+Exemple :
+
+| Ingrédient | Score |
+|------------|--------|
+| Tomate | 100 |
+| Courgette | 90 |
+| Mangue | 10 |
+
+```text
+score_recette = (100 + 90 + 10) / 3
+score_recette = 66,7
+```
+
+Cette approche permet d'éviter qu'un seul ingrédient très durable ou très peu durable influence excessivement le résultat final.
+
+### Étape 3 : bonus de cohérence
+
+Un bonus est appliqué lorsque plus des deux tiers des ingrédients reconnus possèdent un score positif.
+
+L'objectif est de valoriser les recettes dont la majorité des ingrédients sont cohérents avec la saison et le contexte agricole du pays étudié.
+
+### Métriques générées
+
+Le pipeline produit les indicateurs suivants :
+
+- `seasonality_score`
+- `availability_score`
+- `durability_score`
+- `coverage_score`
+---
+
+
+## 🇫🇷 Jeux de données Gold
+
+La couche Gold produit plusieurs jeux de données enrichis utilisés par l'API et l'interface Streamlit.
+
+| Fichier | Description |
+|----------|------------|
+| `gold_yummy_recommendations.parquet` | Dataset principal contenant les r/recettes enrichies et le `yummy_score` |
+| `gold_sentiment_scores.parquet` | Scores de sentiment calculés à partir des avis utilisateurs (VADER) |
+| `gold_ingredient_matches.parquet` | Résultats du matching d'ingrédients par TF-IDF |
+| `gold_recipe_clusters.parquet` | Clusters de recettes générés par KMeans |
+| `gold_cluster_profiles.parquet` | Profils statistiques des clusters |
+| `gold_recipe_ingredient_map.parquet` | Mapping entre recettes et ingrédients |
+| `gold_recipe_durability_scores.parquet` | Scores de durabilité calculés à partir d'EUFIC et FAOSTAT |
+| `gold_recipe_ingredient_matches.parquet` | Correspondances détaillées entre recettes et ingrédients reconnus |
+
+Le fichier principal utilisé par l'API FastAPI est :
+
+```text
+data/gold/gold_yummy_recommendations.parquet
+```
+
+Principales colonnes exposées :
+
+- `recipeid`
+- `name`
+- `recipecategory`
+- `totaltime`
+- `ingredient_count`
+- `aggregatedrating`
+- `reviewcount`
+- `weighted_rating`
+- `sentiment_percentile`
+- `shrunk_sentiment`
+- `rating_score`
+- `popularity_score`
+- `simplicity_score`
+- `yummy_score`
+- `seasonality_score`
+- `availability_score`
+- `durability_score`
+- `coverage_score`
+
+---
+
 
 # 🇫🇷 Stack technique
 
@@ -118,7 +280,7 @@ extract/     -> pipelines d'extraction (Kaggle, Selenium, FAO)
 transform/   -> transformations Bronze → Silver → Gold
 ml/          -> enrichissement ML (sentiment, matching, clustering)
 dbt/         -> pipeline SQL Gold (dbt-duckdb sur MinIO)
-api/         -> service FastAPI
+api/         -> service FastAPI (recommandations, statistiques et recherche de recettes)
 app/         -> interface Streamlit
 tools/       -> scripts utilitaires (upload MinIO, DuckDB, healthcheck…)
 tests/       -> tests pytest + génération de fixtures
@@ -135,6 +297,7 @@ data/        -> couches Medallion (gitignorées)
 
 - Pipelines Bronze/Silver (Food.com, EUFIC, FAOSTAT)
 - Couche Gold analytique avec `yummy_score`
+- Couche Gold de durabilité basée sur EUFIC et FAOSTAT
 - Enrichissement ML (VADER, TF-IDF, KMeans)
 - API FastAPI et interface Streamlit
 - Infrastructure Docker + MinIO + DuckDB + dbt
@@ -184,11 +347,47 @@ YUMMY follows a Medallion Architecture approach:
 |---|---|---|
 | Bronze | Raw extracted datasets | ✅ Implemented |
 | Silver | Cleaned and standardized datasets | ✅ Implemented |
-| Gold | Enriched analytical datasets + recommendation score | ✅ Implemented |
+| Gold | Enriched analytical datasets + recommendation and sustainability score | ✅ Implemented |
 
 The Gold layer is produced by two complementary pipelines: the Python pipeline (`transform/gold/`, `ml/`) and the SQL pipeline (`dbt/`). → See `ml/README.md` for formula details and metrics.
 
 ---
+
+# EN REST API
+
+The FastAPI service exposes the Gold recommendation layer generated by the YUMMY pipeline.
+
+| Endpoint | Description |
+|-----------|------------|
+| `GET /` | Service status check |
+| `GET /health` | API health check and Gold file availability |
+| `GET /stats` | Global statistics about the recommendation dataset |
+| `GET /recommendations` | Top recipes ranked by Yummy Score |
+| `GET /durability` | Top recipes ranked by sustainability score |
+| `GET /recipes-by-score` | Rankings by Yummy Score or sustainability score |
+| `GET /recipe/{recipeid}` | Detailed information about a specific recipe |
+| `GET /quick-recipes` | Best recipes below a maximum preparation time |
+| `GET /category/{category}` | Best recipes for a given recipe category |
+
+Interactive API documentation:
+
+```text
+http://localhost:8000/docs
+```
+
+The API reads data from now:
+
+```text
+data/gold/gold_recipe_durability_scores.parquet
+
+This dataset is generated by the ML and Gold pipeline:
+
+```bash
+python3 tools/build_all_ml.py
+```
+
+---
+
 
 # EN Current Data Sources
 
@@ -206,7 +405,15 @@ The Gold layer is produced by two complementary pipelines: the Python pipeline (
 - Bronze → Silver → Gold transformation pipelines
 - ML enrichment: VADER sentiment analysis, TF-IDF ingredient matching, KMeans clustering
 - `yummy_score` recommendation score (Python pipeline and dbt SQL pipeline)
-- FastAPI service — `GET /recommendations`
+- Sustainability score based on ingredient seasonality (EUFIC) and agricultural availability (FAOSTAT)
+- FastAPI service:
+  - `GET /`
+  - `GET /health`
+  - `GET /stats`
+  - `GET /recommendations`
+  - `GET /recipe/{recipeid}`
+  - `GET /quick-recipes`
+  - `GET /category/{category}`
 - Streamlit UI — country/season selection, cluster filters
 - MinIO object store with dbt-duckdb SQL layer (Gold over Silver)
 - CI/CD with GitHub Actions (Python 3.12, pytest, ruff)
@@ -227,6 +434,134 @@ The Gold layer computes a composite `yummy_score` [0–100] from four components
 | `simplicity_score` | 20 % | Inverse of normalised cook time |
 
 → Full formula, parameters, and worked example: `ml/README.md §6`.
+
+---
+
+# EN Sustainability Score
+
+To complement the Yummy Score, a sustainability score has been developed.
+
+While the Yummy Score primarily measures potential user satisfaction, the sustainability score aims to evaluate how well a recipe aligns with ingredient seasonality and agricultural availability.
+
+## Data Sources
+
+The sustainability score relies on two data sources:
+
+- **EUFIC**: fruit and vegetable seasonality data by country and month;
+- **FAOSTAT**: agricultural production statistics by country.
+
+## Score Computation
+
+### Step 1: Ingredient Sustainability Score
+
+For each recognized ingredient:
+
+```text
+ingredient_score =
+0.75 × seasonality_score
++
+0.25 × availability_score
+```
+
+An ingredient that is both:
+
+- in season;
+- widely produced in the selected country;
+
+will receive a higher sustainability score.
+
+Examples:
+
+| Product | Seasonality | Availability | Sustainability Score |
+|----------|----------|----------|----------|
+| French tomato in July | High | High | High |
+| French tomato in January | Low | High | Medium |
+| Mango in France | Low | Low | Low |
+
+### Step 2: Recipe Sustainability Score
+
+Once an ingredient score has been computed for each recognized ingredient, the recipe sustainability score is calculated as the average of all ingredient scores.
+
+```text
+recipe_score =
+mean(ingredient_score)
+```
+
+Example:
+
+| Ingredient | Score |
+|------------|--------|
+| Tomato | 100 |
+| Zucchini | 90 |
+| Mango | 10 |
+
+```text
+recipe_score =
+(100 + 90 + 10) / 3
+
+recipe_score = 66.7
+```
+
+This approach prevents a single highly sustainable or highly unsustainable ingredient from having an excessive impact on the final recipe score.
+
+### Step 3: Consistency Bonus
+
+A bonus is applied when more than two-thirds of the recognized ingredients have a positive sustainability score.
+
+```text
+if positive_ingredients_ratio >= 66.7%:
+    recipe_score += 10
+```
+
+The objective is to reward recipes whose ingredients are mostly aligned with the seasonal and agricultural context of the selected country.
+
+## Generated Metrics
+
+The pipeline produces the following indicators:
+
+- `seasonality_score`
+- `availability_score`
+- `durability_score`
+- `coverage_score`
+
+---
+
+# EN Gold Datasets
+
+The Gold layer produces several enriched datasets used by the API and Streamlit application.
+
+| File | Description |
+|----------|------------|
+| `gold_yummy_recommendations.parquet` | Main recommendation dataset with Yummy Score |
+| `gold_sentiment_scores.parquet` | Sentiment scores generated from user reviews |
+| `gold_recipe_clusters.parquet` | Recipe clusters generated by KMeans |
+| `gold_cluster_profiles.parquet` | Statistical profiles of recipe clusters |
+| `gold_recipe_durability_scores.parquet` | Sustainability scores computed from EUFIC and FAOSTAT |
+| `gold_recipe_ingredient_matches.parquet` | Ingredient matching results used for sustainability scoring |
+
+
+Main dataset exposed by the FastAPI service: :
+
+```text
+data/gold/gold_yummy_recommendations.parquet
+```
+
+Main exposed columns :
+
+- `recipeid`
+- `name`
+- `recipecategory`
+- `totaltime`
+- `ingredient_count`
+- `aggregatedrating`
+- `reviewcount`
+- `weighted_rating`
+- `sentiment_percentile`
+- `shrunk_sentiment`
+- `rating_score`
+- `popularity_score`
+- `simplicity_score`
+- `yummy_score`
 
 ---
 
@@ -279,6 +614,7 @@ data/        -> Medallion layers (gitignored)
 
 - Bronze/Silver pipelines (Food.com, EUFIC, FAOSTAT)
 - Gold analytical layer with `yummy_score`
+- Sustainability scoring layer based on EUFIC and FAOSTAT
 - ML enrichment (VADER, TF-IDF, KMeans)
 - FastAPI service and Streamlit UI
 - Docker + MinIO + DuckDB + dbt infrastructure
@@ -293,7 +629,7 @@ data/        -> Medallion layers (gitignored)
 
 # Vision
 
-YUMMY is not only a recipe application.
+YUMMY is not only a recipe application.The platform also explores how seasonality and agricultural production data can be leveraged to promote more sustainable food choices.
 
 The project aims to become a sustainable food intelligence platform combining:
 - data engineering,

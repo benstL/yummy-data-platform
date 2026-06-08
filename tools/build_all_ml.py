@@ -1,13 +1,13 @@
 """
 Orchestrator for the full ML / Gold pipeline.
 
-Runs the four steps in the strict dependency order defined in ml/README.md §1:
+Runs the five steps in the strict dependency order defined in ml/README.md §1:
 
     Step 1  ml/matching/ingredient_matcher.py
     Step 2  ml/sentiment/sentiment_analyzer.py        (auto-skips VADER if gold exists)
     Step 3  transform/gold/build_gold_yummy_recommendations.py   (needs step 2)
     Step 4  ml/clustering/recipe_clusterer.py          (needs steps 1 & 3)
-
+    Step 5  transform/gold/build_gold_durability_score.py
 Usage
 -----
     python tools/build_all_ml.py            # run all four steps
@@ -42,6 +42,11 @@ ML_JOBS: list[dict] = [
         "step": 4,
         "name": "Recipe clustering (K-Means)",
         "script": PROJECT_ROOT / "ml" / "clustering" / "recipe_clusterer.py",
+    },
+        {
+        "step": 5,
+        "name": "Gold durability score builder",
+        "script": PROJECT_ROOT / "transform" / "gold" / "build_gold_durability_score.py",
     },
 ]
 
@@ -82,16 +87,16 @@ def run_job(job: dict) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Run the full YUMMY ML / Gold pipeline (steps 1–4).",
+        description="Run the full YUMMY ML / Gold pipeline (steps 1–5).",
     )
     parser.add_argument(
         "--from",
         dest="from_step",
         type=int,
-        choices=[1, 2, 3, 4],
+        choices=[1, 2, 3, 4,5],
         default=1,
         metavar="STEP",
-        help="Resume from this step number (1–4). Steps before STEP are skipped. "
+        help="Resume from this step number (1–5). Steps before STEP are skipped. "
              "Default: 1 (run everything).",
     )
     return parser.parse_args()

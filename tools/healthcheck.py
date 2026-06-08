@@ -312,8 +312,73 @@ def check_duckdb() -> bool:
         _fail(f"Lecture DuckDB/MinIO impossible : {exc}")
         return False
 
+# ── Étape 4 : Durability ──────────────────────────────────────────────────────────── 
 
-# ── Étape 4 : API FastAPI ──────────────────────────────────────────────────────
+def check_durability_gold() -> bool:
+    """
+    Vérifie la cohérence du fichier Gold de durabilité.
+    """
+
+    _header(4, "Gold Durability Score")
+
+    file_path = (
+        PROJECT_ROOT
+        / "data"
+        / "gold"
+        / "gold_recipe_durability_scores.parquet"
+    )
+
+    if not file_path.exists():
+        _fail("gold_recipe_durability_scores.parquet introuvable")
+        return False
+
+    try:
+        import pandas as pd
+
+        df = pd.read_parquet(file_path)
+
+        required_cols = {
+            "recipeid",
+            "seasonality_score",
+            "availability_score",
+            "durability_score",
+            "coverage_score",
+        }
+
+        missing = required_cols - set(df.columns)
+
+        if missing:
+            _fail(f"Colonnes manquantes : {missing}")
+            return False
+
+        if not df["durability_score"].between(0, 100).all():
+            _fail("durability_score hors bornes")
+            return False
+
+        if not df["seasonality_score"].between(0, 100).all():
+            _fail("seasonality_score hors bornes")
+            return False
+
+        if not df["availability_score"].between(0, 100).all():
+            _fail("availability_score hors bornes")
+            return False
+
+        if not df["coverage_score"].between(0, 100).all():
+            _fail("coverage_score hors bornes")
+            return False
+
+        _pass(
+            f"{len(df):,} recettes avec score de durabilité"
+        )
+
+        return True
+
+    except Exception as exc:
+        _fail(str(exc))
+        return False
+
+
+# ── Étape 5 : API FastAPI ──────────────────────────────────────────────────────
 
 def check_api() -> bool:
     """Vérifie que l'API répond et que Bourbon Chicken est en première position.
@@ -321,7 +386,7 @@ def check_api() -> bool:
     GET /recommendations?limit=3 doit retourner du JSON avec recipeid=45809
     en position 0, yummy_score ≈ 82.45.
     """
-    _header(4, "API FastAPI — /recommendations")
+    _header(5, "API FastAPI — /recommendations")
 
     if requests is None:
         _fail("requests non disponible (pip install requests)")
@@ -385,7 +450,7 @@ def check_api() -> bool:
         return False
 
 
-# ── Étape 5 : UI Streamlit ─────────────────────────────────────────────────────
+# ── Étape 6 : UI Streamlit ─────────────────────────────────────────────────────
 
 def check_ui() -> bool:
     """Vérifie que l'interface Streamlit retourne HTTP 200.
@@ -393,7 +458,7 @@ def check_ui() -> bool:
     Une réponse 200 prouve que le serveur Streamlit est démarré et répond.
     Le contenu HTML n'est pas inspecté.
     """
-    _header(5, "UI Streamlit — HTTP 200")
+    _header(6, "UI Streamlit — HTTP 200")
 
     if requests is None:
         _fail("requests non disponible (pip install requests)")
@@ -413,7 +478,7 @@ def check_ui() -> bool:
         return False
 
 
-# ── Étape 6 : Tests pytest ─────────────────────────────────────────────────────
+# ── Étape 7 : Tests pytest ─────────────────────────────────────────────────────
 
 def check_tests() -> bool:
     """Lance pytest -q et vérifie l'exit code 0.
@@ -422,7 +487,7 @@ def check_tests() -> bool:
     Les fixtures sont des données de test synthétiques, leur génération
     est non destructive.
     """
-    _header(6, "Tests pytest")
+    _header(7, "Tests pytest")
 
     fixtures_dir = PROJECT_ROOT / "data" / "tests" / "fixtures"
     fixture_files = list(fixtures_dir.glob("*.parquet")) if fixtures_dir.exists() else []
@@ -466,7 +531,7 @@ def check_tests() -> bool:
 # ── Point d'entrée ─────────────────────────────────────────────────────────────
 
 def main() -> None:
-    """Exécute les 6 étapes et affiche le résumé final.
+    """Exécute les 7 étapes et affiche le résumé final.
 
     Toutes les étapes sont exécutées même si certaines échouent, afin
     de produire un rapport complet. Exit code 0 = tout PASS, 1 = au moins un FAIL.
@@ -483,6 +548,7 @@ def main() -> None:
         ("Docker — 4 conteneurs",              check_docker),
         ("MinIO — bucket et objets",            check_minio),
         ("DuckDB — lecture Gold depuis MinIO",  check_duckdb),
+        ("Gold Durability Score",               check_durability_gold),
         ("API FastAPI — /recommendations",      check_api),
         ("UI Streamlit — HTTP 200",             check_ui),
         ("Tests pytest",                        check_tests),
