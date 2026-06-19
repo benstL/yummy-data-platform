@@ -43,6 +43,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "success_matches":       "**{total:,}** recettes correspondent — top {n} par Score YUMMY.",
         "results_title":         "🏆 Top {n} Recommandations",
         "metric_yummy":          "Score YUMMY",
+        "metric_durability":     "Durabilité",
         "metric_rating":         "Note",
         "metric_time":           "Temps",
         "metric_time_val":       "{t} min",
@@ -83,6 +84,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "success_matches":       "**{total:,}** recipes match — showing top {n} by Yummy Score.",
         "results_title":         "🏆 Top {n} Recommendations",
         "metric_yummy":          "Yummy Score",
+        "metric_durability":     "Durability",
         "metric_rating":         "Rating",
         "metric_time":           "Time",
         "metric_time_val":       "{t} min",
@@ -239,10 +241,17 @@ div[data-testid], .stSelectbox label, .stMultiSelect label {
 }
 .season-flag { font-size: 1.35rem; line-height: 1; flex-shrink: 0; margin-left: 0.8rem; }
 
+/* KPI cards */
+.kpi-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 1rem;
+}
 /* Metrics */
 .metrics-row {
     display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1.8fr;
+    grid-template-columns: 1.5fr 1.5fr 1fr 1fr 1.8fr;
     gap: 0.6rem 1rem;
     margin-bottom: 0.85rem;
     align-items: start;
@@ -262,7 +271,17 @@ div[data-testid], .stSelectbox label, .stMultiSelect label {
     line-height: 1.2;
 }
 .metric-val.primary { color: #F4A261; }
+.metric-val.durability {
+    color: #22C55E;
+}
 .metric-sub { font-size: 0.72em; font-weight: 400; color: #6B7280; }
+
+.durability-badge {
+    font-size: 0.72rem;
+    margin-left: 8px;
+    color: #86EFAC;
+    font-weight: 500;
+}
 
 /* Progress bar */
 .prog-track {
@@ -276,6 +295,16 @@ div[data-testid], .stSelectbox label, .stMultiSelect label {
     height: 100%;
     border-radius: 2px;
     background: linear-gradient(90deg, #F4A261 0%, #FBBF24 100%);
+}
+
+.prog-fill-durability {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(
+        90deg,
+        #22C55E 0%,
+        #86EFAC 100%
+    );
 }
 
 /* Cluster badges */
@@ -325,12 +354,14 @@ span[data-baseweb="tag"] {
 
 @st.cache_data
 def load_recommendations() -> pd.DataFrame:
-    """Load Gold recommendations parquet (UI columns only)."""
+    """Load Gold recommendations enriched with durability scores."""
     return pd.read_parquet(
-        GOLD / "gold_yummy_recommendations.parquet",
+        GOLD / "gold_recipe_durability_scores.parquet",
         columns=[
             "recipeid", "name", "recipecategory", "totaltime",
             "aggregatedrating", "reviewcount", "yummy_score",
+            "seasonality_score", "availability_score",
+            "durability_score", "coverage_score",
         ],
     )
 
@@ -632,6 +663,7 @@ def _season_flag(row: pd.Series, basket_set: set[str], country_in_eufic: bool) -
 
 def render_card(
     row: pd.Series,
+    rank : int,
     basket_set: set[str],
     country_in_eufic: bool,
     texts: dict[str, str],
@@ -645,18 +677,39 @@ def render_card(
                        (user's exact selection yielded 0 hits). The explainability
                        line uses the fallback label rather than inventing matches.
     """
-    rating    = row.get("aggregatedrating") or 0.0
-    totaltime = int(row.get("totaltime") or 0)
-    reviews   = int(row.get("reviewcount") or 0)
-    yummy     = float(row.get("yummy_score") or 0.0)
-    label     = row.get("cluster_label") or ""
-    flag      = _season_flag(row, basket_set, country_in_eufic)
-    ing       = _to_ingredient_set(row.get("matched_ingredients"))
-    hits      = set() if fallback_mode else _ingredient_hits(ing, basket_set)
+    rating     = row.get("aggregatedrating") or 0.0
+    totaltime  = int(row.get("totaltime") or 0)
+    reviews    = int(row.get("reviewcount") or 0)
+    yummy      = float(row.get("yummy_score") or 0.0)
+    durability = float(row.get("durability_score") or 0.0)
+    if durability >= 80:
+        durability_label = "🌱 Très durable"
+    elif durability >= 60:
+        durability_label = "🌿 Durable"
+    elif durability >= 40:
+        durability_label = "🟡 Moyen"
+    else:
+        durability_label = "🔴 Faible"
+    label      = row.get("cluster_label") or ""
+    flag       = _season_flag(row, basket_set, country_in_eufic)
+    ing        = _to_ingredient_set(row.get("matched_ingredients"))
+    hits       = set() if fallback_mode else _ingredient_hits(ing, basket_set)
 
     badge_cls = CLUSTER_BADGE_CLASS.get(label, "badge-global")
     name_h    = _esc(str(row["name"]).title())
     cat_h     = _esc(str(row.get("recipecategory") or "").title())
+
+    rank_badge = ""
+
+    rank = row.name + 1
+
+    if rank == 1:
+        rank_badge = "🥇 "
+    elif rank == 2:
+        rank_badge = "🥈 "
+    elif rank == 3:
+        rank_badge = "🥉 "
+
 
     # ── Explainability text ───────────────────────────────────────────────────
     parts: list[str] = []
@@ -684,7 +737,7 @@ def render_card(
 <div class="recipe-card">
   <div class="card-top">
     <div>
-      <div class="recipe-name">{name_h}</div>
+      <div class="recipe-name">{rank_badge}{name_h}</div>
       {cat_html}
     </div>
     {flag_html}
@@ -695,6 +748,17 @@ def render_card(
       <div class="metric-val primary">{yummy:.1f}<span class="metric-sub">/100</span></div>
       <div class="prog-track">
         <div class="prog-fill" style="width:{min(yummy, 100):.1f}%"></div>
+      </div>
+    </div>
+    <div class="metric-box">
+      <div class="metric-lbl">{_esc(texts['metric_durability'])}</div>
+      <div class="metric-val durability">
+        {durability:.1f}
+        <span class="metric-sub">/100</span>
+        <span class="durability-badge">{durability_label}</span>
+      </div>
+      <div class="prog-track">
+        <div class="prog-fill-durability" style="width:{min(durability, 100):.1f}%"></div>
       </div>
     </div>
     <div class="metric-box">
@@ -836,9 +900,13 @@ def main() -> None:
 
     # ── 4. Generate ─────────────────────────────────────────────────────────────
     _hr()
-    run = st.button(texts["btn_generate"], type="primary", use_container_width=True)
+    if "show_results" not in st.session_state:
+        st.session_state.show_results = False
 
-    if not run:
+    if st.button(texts["btn_generate"], type="primary", use_container_width=True):
+        st.session_state.show_results = True
+
+    if not st.session_state.show_results:
         return
 
     if not basket:
@@ -866,7 +934,111 @@ def main() -> None:
     if cluster_ignored:
         st.info(texts["info_cluster_fallback"])
 
+
+
+    max_time = st.slider(
+        "⏱️ Temps maximum de préparation",
+        min_value=10,
+        max_value=180,
+        value=60,
+        step=5
+    )
+
+    cluster_results = cluster_results[
+        cluster_results["totaltime"].fillna(999) <= max_time
+    ]
+
+    cluster_results = cluster_results[
+    cluster_results["totaltime"].fillna(999) <= max_time
+]
+
+    sort_mode = st.radio(
+        "📌 Trier les recommandations par",
+        [
+            "Score Yummy",
+            "Score Durabilité",
+            "Meilleur compromis"
+        ],
+        horizontal=True,
+    )   
+
+    if sort_mode == "Score Yummy":
+        cluster_results = cluster_results.sort_values("yummy_score", ascending=False)
+
+    elif sort_mode == "Score Durabilité":
+        cluster_results = cluster_results.sort_values("durability_score", ascending=False)
+
+    else:
+        cluster_results = cluster_results.assign(
+            combined_score=(
+                0.6 * cluster_results["yummy_score"]
+                + 0.4 * cluster_results["durability_score"]
+            )
+        ).sort_values("combined_score", ascending=False)
+
     results = cluster_results.head(TOP_N)
+
+    st.divider()
+    st.subheader("📊 Aperçu des résultats")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("🍽️ Recettes", len(results))
+
+    with col2:
+        st.metric(
+            "⭐ Score Yummy Moyen",
+            f"{results['yummy_score'].mean():.1f}"
+        )
+
+    with col3:
+        st.metric(
+            "🌍 Score Durabilité Moyen",
+            f"{results['durability_score'].mean():.1f}"
+        )
+
+    with col4:
+        st.metric(
+            "⏱️ Temps moyen",
+            f"{results['totaltime'].mean():.0f} min"
+        )
+    
+    st.divider()
+
+    with st.expander("  Comprendre le Score Yummy"):
+        st.markdown(""" 
+Le **Score Yummy** classe les recettes selon les données réellement disponibles dans cette version.
+
+Il repose principalement sur :
+
+- ⭐ **rating_score** : qualité perçue via la note moyenne ;
+- 🗣️ **popularity_score** : popularité via le nombre d'avis ;
+- ⏱️ **simplicity_score** : simplicité, notamment liée au temps de préparation ;
+- 💬 **sentiment_percentile** et **shrunk_sentiment** : satisfaction estimée à partir des avis utilisateurs.
+
+Les dimensions nutritionnelles, carbone et saisonnalité sont prévues comme évolutions du score durable cible.
+""")
+
+    with st.expander("🌍 Comprendre le Score de Durabilité"):
+        st.markdown("""
+### Comment est calculé le score ?
+
+Le score de durabilité repose sur :
+
+- 🥕 la saisonnalité des ingrédients (EUFIC)
+- 🌾 la disponibilité agricole (FAOSTAT)
+
+Pour chaque ingrédient :
+
+Durability Score =
+75 % saisonnalité
++
+25 % disponibilité agricole
+
+Le score final de la recette correspond à la moyenne des scores des ingrédients reconnus.
+
+Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un score positif.
+""")
 
     # ── 6. Results ──────────────────────────────────────────────────────────────
     country_in_eufic = country in get_eufic_display_countries()
@@ -877,12 +1049,46 @@ def main() -> None:
         f'<p style="font-size:1.15rem;font-weight:600;color:#E8E8E3;margin:0.6rem 0 0.8rem">'
         f'{_esc(texts["results_title"].format(n=len(results)))}</p>',
         unsafe_allow_html=True,
-    )
+        )
 
-    for _, row in results.iterrows():
-        render_card(row, basket_set, country_in_eufic, texts,
-                    fallback_mode=is_selection_fallback)
+    for rank, (_, row) in enumerate(results.iterrows(), start=1):
+    
+        render_card(
+            row,
+            rank,
+            basket_set,
+            country_in_eufic,
+            texts,
+            fallback_mode=is_selection_fallback
+        )
 
+        with st.expander("📖 Détails de la recette"):
+
+            st.markdown("### 🌍 Durabilité")
+
+            st.write(
+                f"🌱 Saisonnalité : {row.get('seasonality_score',0):.1f}/100"
+            )
+
+            st.write(
+                f"🌾 Disponibilité agricole : {row.get('availability_score',0):.1f}/100"
+            )
+
+            st.write(
+                f"🎯 Couverture : {row.get('coverage_score',0):.1f}/100"
+            )
+
+            st.divider()
+
+            st.markdown("### 🧺 Ingrédients reconnus")
+
+            ingredients = list(row["matched_ingredients"])
+
+            for ingredient in ingredients:
+                st.write(f"• {ingredient}")
+
+        st.divider()
+          
     # ── Debug expander ──────────────────────────────────────────────────────────
     with st.expander(texts["debug_title"], expanded=False):
         st.write(f"**{texts['debug_selected']}:**", basket_set)
@@ -900,7 +1106,6 @@ def main() -> None:
             .sum()
         )
         st.write(f"**{texts['debug_total']}:** {qualifying:,}")
-
 
 if __name__ == "__main__":
     main()

@@ -40,9 +40,14 @@ with DAG(
         bash_command="cd /opt/airflow/project && python transform/gold/build_gold_yummy_recommendations.py",
     )
 
+    build_durability_score = BashOperator(
+    task_id="build_durability_score",
+    bash_command="cd /opt/airflow/project && python transform/gold/build_gold_durability_score.py",
+    )
+
     upload_to_minio = BashOperator(
         task_id="upload_to_minio",
         bash_command="cd /opt/airflow/project && python tools/upload_to_minio.py",
     )
 
-    build_silver >> build_gold >> upload_to_minio
+    build_silver >> build_gold >> build_durability_score >> upload_to_minio

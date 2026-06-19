@@ -61,6 +61,36 @@ Ne jamais utiliser `--break-system-packages` pour contourner PEP 668 ; voir §8 
 
 Toutes les commandes du projet — Docker, Python, pytest, dbt — se lancent depuis la **racine du projet** (le dossier qui contient `docker-compose.yml`). Les chemins dans le code applicatif sont relatifs à cette racine (`Path("data/gold/…")`).
 
+### 1.4 Kaggle API Token
+
+Le téléchargement des données Food.com nécessite un compte Kaggle et un token API.
+
+Créer un token :
+
+1. Se connecter à Kaggle.
+2. Aller dans Settings.
+3. Descendre jusqu'à la section API.
+4. Cliquer sur Create New Token.
+
+Configurer le token sous Linux / WSL :
+
+```bash
+mkdir -p ~/.kaggle
+echo "<KAGGLE_API_TOKEN>" > ~/.kaggle/access_token
+chmod 600 ~/.kaggle/access_token
+```
+
+Vérification :
+
+```bash
+kaggle datasets list -s foodcom
+```
+
+Le téléchargement Food.com peut ensuite être lancé avec :
+
+```bash
+python3 extract/foodcom/download_foodcom.py
+```
 ---
 
 ## 2. Architecture d'ensemble
@@ -509,6 +539,36 @@ Le workflow GitHub Actions ne configure aucun `cache: 'pip'` sur l'étape `setup
 `depends_on: [api]` sur le service `ui` garantit l'**ordre de démarrage**, pas la disponibilité applicative. Sur machines lentes, Streamlit peut démarrer avant qu'uvicorn soit prêt — les premières requêtes inter-service échouent (non bloquant en pratique, l'UI ne passe pas par l'API).
 
 
+### 7.8 Selenium sous WSL / Linux headless
+
+Le scraper EUFIC utilise Selenium et Chrome.
+
+Sur certains environnements Linux, WSL ou Docker, Chrome peut échouer avec :
+
+```text
+SessionNotCreatedException:
+DevToolsActivePort file doesn't exist
+```
+
+ou :
+
+```text
+WebDriverException:
+chromedriver unexpectedly exited
+```
+
+Pour améliorer la compatibilité des environnements headless, les options Chrome suivantes sont recommandées :
+
+```python
+chrome_options.add_argument("--headless=new")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--remote-debugging-port=9222")
+chrome_options.add_argument("--window-size=1920,1080")
+```
+
+Ces options ont été validées sur WSL Ubuntu.
 ---
 
 ## 8. Dépannage
