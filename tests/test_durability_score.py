@@ -11,9 +11,9 @@ def make_recipe_matches_fixture():
     return pd.DataFrame(
         {
             "recipeid": [1, 1, 2, 2, 3],
-            "ingredient_token": ["apple", "tomato", "rice", "banana", "unknown"],
-            "matched_term": ["apple", "tomato", "rice", "banana", None],
-            "source": ["eufic", "eufic", "faostat", "eufic", "unmatched"],
+            "ingredient_token": ["tomato", "strawberry", "potato", "garlic", "unknown"],
+            "matched_term": ["tomato", "strawberry", "potato", "garlic", None],
+            "source": ["eufic", "eufic", "eufic", "eufic", "unmatched"],
         }
     )
 
@@ -23,7 +23,7 @@ def durability_df(eufic_df, faostat_df):
 
     seasonality_ref = build_seasonality_reference(
         eufic_df,
-        country="france",
+        country="fr",
         month=6,
     )
 
