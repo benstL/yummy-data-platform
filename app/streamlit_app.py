@@ -792,14 +792,13 @@ def main() -> None:
     )
     inject_css()
 
-    # ── Language toggle (top-right) ────────────────────────────────────────────
-    _, lang_col = st.columns([4, 1])
-    with lang_col:
+    # ── Language toggle (sidebar) ──────────────────────────────────────────────
+    with st.sidebar:
         lang: str = st.selectbox(
-            "lang",
+            "Langue / Language",
             options=["fr", "en"],
             format_func=lambda x: "🇫🇷 Français" if x == "fr" else "🇬🇧 English",
-            label_visibility="collapsed",
+            label_visibility="visible",
         )
 
     texts       = TEXTS[lang]
@@ -830,7 +829,7 @@ def main() -> None:
             texts["month_label"],
             options=list(month_names.keys()),
             format_func=lambda x: month_names[x],
-            index=4,
+            index=5,
         )
 
     # ── 2. Confidence banner ────────────────────────────────────────────────────
