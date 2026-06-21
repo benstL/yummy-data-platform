@@ -641,7 +641,7 @@ Non. Les 37.6 % originaux incluaient 814 faux positifs où des tokens sans rappo
 
 **Q2 : « Pourquoi K-Means et non DBSCAN ou le clustering hiérarchique ? »**
 
-K-Means est interprétable, rapide sur 275K lignes, et produit des clusters de taille fixe adaptés aux 5 personas étiquetés définis en amont. DBSCAN produirait des clusters variables, potentiellement très petits, dans un espace de features continu et dense. La silhouette de 0.29 est cohérente avec la nature chevauchante connue des catégories alimentaires — c'est attendu, pas un échec.
+K-Means est interprétable, rapide sur 275K lignes, et produit des clusters de taille fixe adaptés aux 5 personas étiquetés définis en amont. DBSCAN produirait des clusters variables, potentiellement très petits, dans un espace de features continu et dense. La silhouette de 0.2912 est cohérente avec la nature chevauchante connue des catégories alimentaires — c'est attendu, pas un échec.
 
 **Q3 : « Le m bayésien = 5 semble bas. Une recette avec 6 avis ne pourrait-elle pas encore tromper le classement ? »**
 
@@ -1333,7 +1333,7 @@ precision is restored.
 K-Means is interpretable, fast at 275K rows, and produces fixed-size clusters
 suitable for the 5 labelled personas we defined upfront. DBSCAN would produce
 variable, potentially very small clusters in a dense continuous feature space.
-The silhouette of 0.29 is consistent with the known overlapping nature of food
+The silhouette of 0.2912 is consistent with the known overlapping nature of food
 categories — this is expected, not a failure.
 
 **Q3: "The Bayesian m=5 seems low. Couldn't a 6-review recipe still game the ranking?"**

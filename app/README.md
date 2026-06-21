@@ -71,11 +71,27 @@ Le chemin de migration V2 consiste à remplacer l'appel `build_merged()` par une
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Step 6 — Results                                                │
-│  Top 10 recipe cards, ranked by yummy_score.                     │
-│  Each card shows: name, category, Yummy Score (+ progress bar),  │
-│  Rating, Time, Cluster badge (colour-coded), season flag 🟢/🟡,  │
-│  and an explainability caption.                                  │
+│  Step 6 — Filtres post-génération                               │
+│  Slider "⏱️ Temps max" : 10–180 min (défaut 60, pas 5).        │
+│  Radio "Trier par" : Score Yummy · Score Durabilité ·           │
+│  Meilleur compromis (0,6 × Yummy + 0,4 × Durabilité).          │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 7 — Aperçu des résultats                                  │
+│  4 métriques agrégées : nb recettes · score Yummy moyen ·       │
+│  score Durabilité moyen · temps moyen.                          │
+│  + 2 expanders "Comprendre le Score" (Yummy / Durabilité).      │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 8 — Cartes recettes                                       │
+│  Top 10 selon le tri choisi. Chaque carte : nom, catégorie,     │
+│  médaille 🥇/🥈/🥉 (rang 1–3), Score Yummy + barre,           │
+│  Durabilité + badge (🌱/🌿/🟡/🔴) + barre, note, temps,       │
+│  badge cluster, indicateur saison 🟢/🟡, légende.              │
+│  Expander "📖 Détails de la recette" : saisonnalité,            │
+│  disponibilité agricole et couverture (/100) + ingrédients.     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -137,6 +153,51 @@ texts = TEXTS[lang]      # all subsequent UI strings use texts["key"]
 L'application comporte ~35 chaînes traduisibles, toutes codées en dur dans un seul fichier. gettext ajoute une complexité de build (fichiers `.po` / `.mo`, outillage d'extraction) sans bénéfice à cette échelle. Un dictionnaire simple est transparent, versionné et refactorable en quelques secondes.
 
 **Les étiquettes de clusters ne sont intentionnellement pas traduites.** Elles constituent la sortie de la taxonomie ML (colonne `cluster_label` dans les parquets Gold) et servent de contrat d'interface entre les couches ML et UI — les traduire briserait ce contrat et nécessiterait un ré-étiquetage des parquets.
+
+#### 3.6 Filtre de temps de préparation
+
+Après génération, un slider permet de restreindre les résultats :
+
+```python
+max_time = st.slider("⏱️ Temps maximum de préparation", min_value=10, max_value=180, value=60, step=5)
+cluster_results = cluster_results[cluster_results["totaltime"].fillna(999) <= max_time]
+```
+
+Les recettes sans `totaltime` (valeur `NaN`) sont traitées comme ayant 999 min et exclues dès que le slider passe en dessous de 999. Le filtre est appliqué avant le tri.
+
+#### 3.7 Mode de tri des résultats
+
+Un radio à 3 options (horizontal) apparaît après le slider :
+
+| Option | Comportement |
+|---|---|
+| **Score Yummy** | `sort_values("yummy_score", ascending=False)` |
+| **Score Durabilité** | `sort_values("durability_score", ascending=False)` |
+| **Meilleur compromis** | `0.6 × yummy_score + 0.4 × durability_score`, trié décroissant |
+
+> **Note V1 :** les tris « Score Durabilité » et « Meilleur compromis » s'appuient sur `durability_score` pré-calculé pour France / Juin uniquement. La sélection pays/mois ne recalcule pas ce score — elle pilote uniquement le panier EUFIC. Voir `ml/README.md §7.4`.
+
+#### 3.8 Aperçu des résultats
+
+Affiché après le tri, avant les cartes :
+
+```python
+st.subheader("📊 Aperçu des résultats")
+# 4 colonnes : nb recettes · score Yummy moyen · score Durabilité moyen · temps moyen
+```
+
+Suivi de deux expanders :
+- **Comprendre le Score Yummy** : composantes (note, popularité, simplicité, sentiment).
+- **🌍 Comprendre le Score de Durabilité** : formule (75 % saisonnalité + 25 % disponibilité, bonus ≥ 2/3).
+
+#### 3.9 Détails de la recette
+
+Chaque carte recette dispose d'un expander `📖 Détails de la recette` qui expose :
+
+- 🌱 **Saisonnalité** : `seasonality_score / 100`
+- 🌾 **Disponibilité agricole** : `availability_score / 100`
+- 🎯 **Couverture** : `coverage_score / 100`
+- 🧺 Liste des ingrédients reconnus (`matched_ingredients`)
 
 ---
 
@@ -469,11 +530,27 @@ API fetch — no other changes required.
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Step 6 — Results                                                │
-│  Top 10 recipe cards, ranked by yummy_score.                     │
-│  Each card shows: name, category, Yummy Score (+ progress bar),  │
-│  Rating, Time, Cluster badge (colour-coded), season flag 🟢/🟡,  │
-│  and an explainability caption.                                  │
+│  Step 6 — Post-generation filters                               │
+│  Slider "⏱️ Max time": 10–180 min (default 60, step 5).        │
+│  Radio "Sort by": Score Yummy · Score Durabilité ·              │
+│  Best trade-off (0.6 × Yummy + 0.4 × Durability).              │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 7 — Results overview                                      │
+│  4 aggregate metrics: recipe count · avg Yummy Score ·          │
+│  avg Durability Score · avg prep time.                          │
+│  + 2 "Understand the Score" expanders (Yummy / Durability).     │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 8 — Recipe cards                                          │
+│  Top 10 in the chosen sort order. Each card: name, category,    │
+│  medal 🥇/🥈/🥉 (ranks 1–3), Yummy Score + bar,               │
+│  Durability + badge (🌱/🌿/🟡/🔴) + bar, rating, time,        │
+│  cluster badge, season flag 🟢/🟡, caption.                    │
+│  Expander "📖 Recipe details": seasonality, agricultural        │
+│  availability, coverage (/100) + recognised ingredients.        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -549,6 +626,55 @@ and refactored in seconds.
 output (`cluster_label` column in Gold parquets) and serve as an interface
 contract between the ML and UI layers — translating them would break that
 contract and require re-labelling the parquets.
+
+### 3.6 Preparation time filter
+
+After generation, a slider lets the user restrict results by prep time:
+
+```python
+max_time = st.slider("⏱️ Temps maximum de préparation", min_value=10, max_value=180, value=60, step=5)
+cluster_results = cluster_results[cluster_results["totaltime"].fillna(999) <= max_time]
+```
+
+Recipes with `NaN` totaltime are treated as 999 min and filtered out once the
+slider falls below 999. The filter is applied before sorting.
+
+### 3.7 Results sort mode
+
+A horizontal radio with three options appears below the slider:
+
+| Option | Behaviour |
+|---|---|
+| **Score Yummy** | `sort_values("yummy_score", ascending=False)` |
+| **Score Durabilité** | `sort_values("durability_score", ascending=False)` |
+| **Meilleur compromis** | `0.6 × yummy_score + 0.4 × durability_score`, sorted descending |
+
+> **V1 note:** the "Score Durabilité" and "Meilleur compromis" sorts rely on a
+> `durability_score` pre-computed for France / June only. Changing the
+> country/month selection does not recompute this score — it only drives the
+> EUFIC basket. See `ml/README.md §7.4`.
+
+### 3.8 Results overview
+
+Shown after sorting, before the recipe cards:
+
+```python
+st.subheader("📊 Aperçu des résultats")
+# 4 columns: recipe count · avg Yummy Score · avg Durability Score · avg prep time
+```
+
+Followed by two expanders:
+- **Comprendre le Score Yummy** — component breakdown (rating, popularity, simplicity, sentiment).
+- **🌍 Comprendre le Score de Durabilité** — formula (75 % seasonality + 25 % availability, bonus ≥ 2/3).
+
+### 3.9 Recipe details expander
+
+Each recipe card has an expander `📖 Détails de la recette` that exposes:
+
+- 🌱 **Seasonality**: `seasonality_score / 100`
+- 🌾 **Agricultural availability**: `availability_score / 100`
+- 🎯 **Coverage**: `coverage_score / 100`
+- 🧺 List of recognised ingredients (`matched_ingredients`)
 
 ---
 
