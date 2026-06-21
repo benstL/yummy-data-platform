@@ -701,8 +701,6 @@ def render_card(
 
     rank_badge = ""
 
-    rank = row.name + 1
-
     if rank == 1:
         rank_badge = "🥇 "
     elif rank == 2:
@@ -946,10 +944,6 @@ def main() -> None:
     cluster_results = cluster_results[
         cluster_results["totaltime"].fillna(999) <= max_time
     ]
-
-    cluster_results = cluster_results[
-    cluster_results["totaltime"].fillna(999) <= max_time
-]
 
     sort_mode = st.radio(
         "📌 Trier les recommandations par",
