@@ -38,13 +38,13 @@ Le chemin de migration V2 consiste à remplacer l'appel `build_merged()` par une
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 1 — Language                                               │
-│  Select 🇫🇷 Français or 🇬🇧 English (top-right dropdown)         │
+│  Select 🇫🇷 Français or 🇬🇧 English (sidebar (left))            │
 │  All UI strings switch immediately; ML cluster labels stay EN.   │
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 2 — Context                                                │
-│  Pick Country (273 options) + Month (Jan–Dec, default May).      │
+│  Pick Country (273 options) + Month (Jan–Dec, default June).     │
 │  A confidence banner appears immediately below showing whether   │
 │  EUFIC 🟢, FAOSTAT 🟡, or neither 🔴 has data for that country. │
 └────────────────────────┬────────────────────────────────────────┘
@@ -314,6 +314,15 @@ Les colonnes listées ici constituent l'**interface entre le pipeline ML et l'in
 | `recipeid` | int64 | Clé de jointure |
 | `sentiment_percentile` | float64 | (chargé, disponible pour affichage futur) |
 
+**`gold_recipe_durability_scores.parquet`** (via `load_recommendations()`)
+
+| Colonne | Type | Utilisé pour |
+|---|---|---|
+| `durability_score` | float64 | Badge durabilité + barre de progression |
+| `coverage_score` | float64 | (chargé, disponible) |
+| `seasonality_score` | float64 | (chargé, disponible) |
+| `availability_score` | float64 | (chargé, disponible) |
+
 **Parquets Silver** (données pays/panier, chargés en cache au démarrage)
 
 | Fichier | Colonnes lues | Utilisé pour |
@@ -332,7 +341,7 @@ Les colonnes listées ici constituent l'**interface entre le pipeline ML et l'in
 pip install -r requirements.txt
 ```
 
-Les parquets Gold requis doivent exister (exécuter d'abord le pipeline ML — voir `ml/README.md §8`).
+Les parquets Gold requis doivent exister (exécuter d'abord le pipeline ML — voir `ml/README.md §9`).
 
 #### Lancer l'application
 
@@ -375,6 +384,7 @@ Au premier clic sur le bouton, `build_merged()` charge et joint quatre parquets 
 | 4 ID de sentiment orphelins | Les IDs de recettes `{424301, 371545, 432898, 194165}` existent dans `gold_sentiment_scores` mais pas dans `gold_yummy_recommendations` (incohérence `reviewcount == 0` dans les sources). Jamais interrogés par l'interface. |
 | `api/main.py` lit le parquet à chaque requête | Aucun cache côté serveur ni gestion d'erreur pour un fichier manquant. Pris en charge par l'équipe API ; signalé à leur backlog. La démo n'est pas affectée car l'interface lit les parquets directement. |
 | Les scripts nécessitent une exécution depuis la racine du projet | Les chemins relatifs `Path("data/…")` utilisés partout — une exécution depuis un sous-répertoire déclenche une `FileNotFoundError`. |
+| Score de durabilité pré-calculé pour France / Juin uniquement | La sélection pays/mois pilote le panier d'ingrédients EUFIC, mais ne recalcule pas le `durability_score` affiché — celui-ci reste celui de France / Juin quelle que soit la sélection (voir `ml/README.md §7.4`). |
 
 #### Feuille de route V2
 
@@ -426,13 +436,13 @@ API fetch — no other changes required.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 1 — Language                                               │
-│  Select 🇫🇷 Français or 🇬🇧 English (top-right dropdown)         │
+│  Select 🇫🇷 Français or 🇬🇧 English (sidebar (left))            │
 │  All UI strings switch immediately; ML cluster labels stay EN.   │
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 2 — Context                                                │
-│  Pick Country (273 options) + Month (Jan–Dec, default May).      │
+│  Pick Country (273 options) + Month (Jan–Dec, default June).     │
 │  A confidence banner appears immediately below showing whether   │
 │  EUFIC 🟢, FAOSTAT 🟡, or neither 🔴 has data for that country. │
 └────────────────────────┬────────────────────────────────────────┘
@@ -730,6 +740,15 @@ Changes to column names or types in Gold parquets must be reflected here.
 | `recipeid` | int64 | Join key |
 | `sentiment_percentile` | float64 | (loaded, available for future display) |
 
+**`gold_recipe_durability_scores.parquet`** (via `load_recommendations()`)
+
+| Column | Type | Used for |
+|---|---|---|
+| `durability_score` | float64 | Durability badge + progress bar |
+| `coverage_score` | float64 | (loaded, available) |
+| `seasonality_score` | float64 | (loaded, available) |
+| `availability_score` | float64 | (loaded, available) |
+
 **Silver parquets** (country/basket data, loaded cached at startup)
 
 | File | Columns read | Used for |
@@ -748,7 +767,7 @@ Changes to column names or types in Gold parquets must be reflected here.
 pip install -r requirements.txt
 ```
 
-Required Gold parquets must exist (run the ML pipeline first — see `ml/README.md §8`).
+Required Gold parquets must exist (run the ML pipeline first — see `ml/README.md §9`).
 
 ### Start the app
 
@@ -793,6 +812,7 @@ calls within the same session are instant (`@st.cache_data`).
 | 4 orphan sentiment IDs | Recipe IDs `{424301, 371545, 432898, 194165}` exist in `gold_sentiment_scores` but not in `gold_yummy_recommendations` (source `reviewcount == 0` inconsistency). They are never queried by the UI. |
 | `api/main.py` reads parquet per request | No server-side cache or graceful error handling for a missing file. Owned by the API team; flagged for their backlog. Demo is unaffected because the UI reads parquets directly. |
 | Scripts require project-root execution | Relative `Path("data/…")` paths used throughout — running from a subdirectory raises `FileNotFoundError`. |
+| Durability score pre-computed for France / June only | The country/month selection drives the EUFIC ingredient basket but does not recompute the displayed `durability_score` — it stays France / June regardless of selection (see `ml/README.md §7.4`). |
 
 ### V2 roadmap
 
