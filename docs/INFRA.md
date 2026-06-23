@@ -125,6 +125,12 @@ MinIO s3://yummy/            (object store local, port 9000)
          │         │                                                           │
          │         ▼                                                           │
          │    data/gold/gold_yummy_recommendations.parquet  (local, gitignored)│
+         │         │                                                           │
+         │         ▼  transform/gold/build_gold_durability_score.py           │
+         │            ← DAG yummy_pipeline (tâche build_durability_score)     │
+         │         │                                                           │
+         │         ▼                                                           │
+         │    data/gold/gold_recipe_durability_scores.parquet (gitignored)    │
          │                    ← l'API et Streamlit lisent ICI                 │
          │                                                                     │
          └─── chemin dbt ─────────────────────────────────────────────────────┘
@@ -140,7 +146,7 @@ tools/query_duckdb.py        (vérifie la lecture DuckDB ← MinIO)
          ▼
 API FastAPI  localhost:8000   (lit data/gold/ via volume Docker)
 UI Streamlit localhost:8501   (lit data/gold/ + data/silver/ via volume Docker)
-Airflow      localhost:8080   (orchestre build_silver → build_gold → upload_to_minio via DAG yummy_pipeline @daily)
+Airflow      localhost:8080   (orchestre build_silver → build_gold → build_durability_score → upload_to_minio via DAG yummy_pipeline @daily)
 ```
 
 ### 2.2 Contrat de stockage MinIO
@@ -158,6 +164,7 @@ Le bucket `yummy` est la seule source de vérité pour la couche objet. Les chem
 | `s3://yummy/gold/gold_recipe_ingredient_map.parquet` | Carte ingrédients | `tools/upload_to_minio.py` |
 | `s3://yummy/gold/gold_recipe_clusters.parquet` | Clusters KMeans | `tools/upload_to_minio.py` |
 | `s3://yummy/gold/gold_cluster_profiles.parquet` | Profils moyens des 5 clusters | `tools/upload_to_minio.py` |
+| `s3://yummy/gold/gold_recipe_durability_scores.parquet` | Scores de durabilité (France/Juin, V1) | `tools/upload_to_minio.py` |
 
 ---
 
@@ -309,9 +316,10 @@ Fichier : `dags/yummy_pipeline.py`
 |---|---|---|
 | `build_silver` | `tools/build_all_silver.py` | Parquets Silver (FoodCom + EUFIC + FAOSTAT) dans `data/silver/` |
 | `build_gold` | `transform/gold/build_gold_yummy_recommendations.py` | `data/gold/gold_yummy_recommendations.parquet` |
-| `upload_to_minio` | `tools/upload_to_minio.py` | Pousse les 3 layers (bronze, silver, gold) vers `s3://yummy/` — dont les 6 fichiers Gold dans `s3://yummy/gold/` (`gold_yummy_recommendations`, `gold_sentiment_scores`, `gold_ingredient_matches`, `gold_recipe_ingredient_map`, `gold_recipe_clusters`, `gold_cluster_profiles`) |
+| `build_durability_score` | `transform/gold/build_gold_durability_score.py` | `data/gold/gold_recipe_durability_scores.parquet` |
+| `upload_to_minio` | `tools/upload_to_minio.py` | Pousse les 3 layers (bronze, silver, gold) vers `s3://yummy/` — tous les fichiers Gold via `rglob("*")` (inclut `gold_recipe_durability_scores`) |
 
-**Graphe d'exécution actif :** `build_silver >> build_gold >> upload_to_minio`
+**Graphe d'exécution actif :** `build_silver >> build_gold >> build_durability_score >> upload_to_minio`
 
 **Accès à l'UI Airflow :**
 
@@ -489,13 +497,15 @@ Le parquet Gold est produit par **deux chemins indépendants** qui coexistent :
 **L'API (`api/main.py`) et Streamlit (`app/streamlit_app.py`) lisent le fichier local :**
 
 ```python
-# api/main.py
+# api/main.py — fichier PRIMAIRE lu par l'API
+DURABILITY_FILE = Path("data/gold/gold_recipe_durability_scores.parquet")
+# api/main.py — fallback si gold_recipe_durability_scores absent
 GOLD_FILE = Path("data/gold/gold_yummy_recommendations.parquet")
 # app/streamlit_app.py
 GOLD = Path("data/gold")
 ```
 
-Ces chemins sont résolus depuis le `WORKDIR /app` du conteneur, via le volume `./data:/app/data:ro`. **L'API ne lit jamais depuis MinIO directement.** Elle consomme exclusivement ce que le volume expose, soit le parquet produit par le pipeline Python.
+Ces chemins sont résolus depuis le `WORKDIR /app` du conteneur, via le volume `./data:/app/data:ro`. **L'API ne lit jamais depuis MinIO directement.** Elle consomme exclusivement ce que le volume expose. Depuis l'ajout du pipeline de durabilité, l'API lit `gold_recipe_durability_scores.parquet` en priorité ; `gold_yummy_recommendations.parquet` n'est utilisé qu'en fallback.
 
 ### 6.3 Concordance Python vs dbt
 
@@ -539,7 +549,7 @@ Le workflow GitHub Actions ne configure aucun `cache: 'pip'` sur l'étape `setup
 `depends_on: [api]` sur le service `ui` garantit l'**ordre de démarrage**, pas la disponibilité applicative. Sur machines lentes, Streamlit peut démarrer avant qu'uvicorn soit prêt — les premières requêtes inter-service échouent (non bloquant en pratique, l'UI ne passe pas par l'API).
 
 
-### 7.8 Selenium sous WSL / Linux headless
+### 7.7 Selenium sous WSL / Linux headless
 
 Le scraper EUFIC utilise Selenium et Chrome.
 

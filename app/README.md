@@ -38,13 +38,13 @@ Le chemin de migration V2 consiste à remplacer l'appel `build_merged()` par une
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 1 — Language                                               │
-│  Select 🇫🇷 Français or 🇬🇧 English (top-right dropdown)         │
+│  Select 🇫🇷 Français or 🇬🇧 English (sidebar (left))            │
 │  All UI strings switch immediately; ML cluster labels stay EN.   │
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 2 — Context                                                │
-│  Pick Country (273 options) + Month (Jan–Dec, default May).      │
+│  Pick Country (273 options) + Month (Jan–Dec, default June).     │
 │  A confidence banner appears immediately below showing whether   │
 │  EUFIC 🟢, FAOSTAT 🟡, or neither 🔴 has data for that country. │
 └────────────────────────┬────────────────────────────────────────┘
@@ -71,11 +71,27 @@ Le chemin de migration V2 consiste à remplacer l'appel `build_merged()` par une
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Step 6 — Results                                                │
-│  Top 10 recipe cards, ranked by yummy_score.                     │
-│  Each card shows: name, category, Yummy Score (+ progress bar),  │
-│  Rating, Time, Cluster badge (colour-coded), season flag 🟢/🟡,  │
-│  and an explainability caption.                                  │
+│  Step 6 — Filtres post-génération                               │
+│  Slider "⏱️ Temps max" : 10–180 min (défaut 60, pas 5).        │
+│  Radio "Trier par" : Score Yummy · Score Durabilité ·           │
+│  Meilleur compromis (0,6 × Yummy + 0,4 × Durabilité).          │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 7 — Aperçu des résultats                                  │
+│  4 métriques agrégées : nb recettes · score Yummy moyen ·       │
+│  score Durabilité moyen · temps moyen.                          │
+│  + 2 expanders "Comprendre le Score" (Yummy / Durabilité).      │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 8 — Cartes recettes                                       │
+│  Top 10 selon le tri choisi. Chaque carte : nom, catégorie,     │
+│  médaille 🥇/🥈/🥉 (rang 1–3), Score Yummy + barre,           │
+│  Durabilité + badge (🌱/🌿/🟡/🔴) + barre, note, temps,       │
+│  badge cluster, indicateur saison 🟢/🟡, légende.              │
+│  Expander "📖 Détails de la recette" : saisonnalité,            │
+│  disponibilité agricole et couverture (/100) + ingrédients.     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -137,6 +153,51 @@ texts = TEXTS[lang]      # all subsequent UI strings use texts["key"]
 L'application comporte ~35 chaînes traduisibles, toutes codées en dur dans un seul fichier. gettext ajoute une complexité de build (fichiers `.po` / `.mo`, outillage d'extraction) sans bénéfice à cette échelle. Un dictionnaire simple est transparent, versionné et refactorable en quelques secondes.
 
 **Les étiquettes de clusters ne sont intentionnellement pas traduites.** Elles constituent la sortie de la taxonomie ML (colonne `cluster_label` dans les parquets Gold) et servent de contrat d'interface entre les couches ML et UI — les traduire briserait ce contrat et nécessiterait un ré-étiquetage des parquets.
+
+#### 3.6 Filtre de temps de préparation
+
+Après génération, un slider permet de restreindre les résultats :
+
+```python
+max_time = st.slider("⏱️ Temps maximum de préparation", min_value=10, max_value=180, value=60, step=5)
+cluster_results = cluster_results[cluster_results["totaltime"].fillna(999) <= max_time]
+```
+
+Les recettes sans `totaltime` (valeur `NaN`) sont traitées comme ayant 999 min et exclues dès que le slider passe en dessous de 999. Le filtre est appliqué avant le tri.
+
+#### 3.7 Mode de tri des résultats
+
+Un radio à 3 options (horizontal) apparaît après le slider :
+
+| Option | Comportement |
+|---|---|
+| **Score Yummy** | `sort_values("yummy_score", ascending=False)` |
+| **Score Durabilité** | `sort_values("durability_score", ascending=False)` |
+| **Meilleur compromis** | `0.6 × yummy_score + 0.4 × durability_score`, trié décroissant |
+
+> **Note V1 :** les tris « Score Durabilité » et « Meilleur compromis » s'appuient sur `durability_score` pré-calculé pour France / Juin uniquement. La sélection pays/mois ne recalcule pas ce score — elle pilote uniquement le panier EUFIC. Voir `ml/README.md §7.4`.
+
+#### 3.8 Aperçu des résultats
+
+Affiché après le tri, avant les cartes :
+
+```python
+st.subheader("📊 Aperçu des résultats")
+# 4 colonnes : nb recettes · score Yummy moyen · score Durabilité moyen · temps moyen
+```
+
+Suivi de deux expanders :
+- **Comprendre le Score Yummy** : composantes (note, popularité, simplicité, sentiment).
+- **🌍 Comprendre le Score de Durabilité** : formule (75 % saisonnalité + 25 % disponibilité, bonus ≥ 2/3).
+
+#### 3.9 Détails de la recette
+
+Chaque carte recette dispose d'un expander `📖 Détails de la recette` qui expose :
+
+- 🌱 **Saisonnalité** : `seasonality_score / 100`
+- 🌾 **Disponibilité agricole** : `availability_score / 100`
+- 🎯 **Couverture** : `coverage_score / 100`
+- 🧺 Liste des ingrédients reconnus (`matched_ingredients`)
 
 ---
 
@@ -314,6 +375,15 @@ Les colonnes listées ici constituent l'**interface entre le pipeline ML et l'in
 | `recipeid` | int64 | Clé de jointure |
 | `sentiment_percentile` | float64 | (chargé, disponible pour affichage futur) |
 
+**`gold_recipe_durability_scores.parquet`** (via `load_recommendations()`)
+
+| Colonne | Type | Utilisé pour |
+|---|---|---|
+| `durability_score` | float64 | Badge durabilité + barre de progression |
+| `coverage_score` | float64 | (chargé, disponible) |
+| `seasonality_score` | float64 | (chargé, disponible) |
+| `availability_score` | float64 | (chargé, disponible) |
+
 **Parquets Silver** (données pays/panier, chargés en cache au démarrage)
 
 | Fichier | Colonnes lues | Utilisé pour |
@@ -332,7 +402,7 @@ Les colonnes listées ici constituent l'**interface entre le pipeline ML et l'in
 pip install -r requirements.txt
 ```
 
-Les parquets Gold requis doivent exister (exécuter d'abord le pipeline ML — voir `ml/README.md §8`).
+Les parquets Gold requis doivent exister (exécuter d'abord le pipeline ML — voir `ml/README.md §9`).
 
 #### Lancer l'application
 
@@ -375,6 +445,7 @@ Au premier clic sur le bouton, `build_merged()` charge et joint quatre parquets 
 | 4 ID de sentiment orphelins | Les IDs de recettes `{424301, 371545, 432898, 194165}` existent dans `gold_sentiment_scores` mais pas dans `gold_yummy_recommendations` (incohérence `reviewcount == 0` dans les sources). Jamais interrogés par l'interface. |
 | `api/main.py` lit le parquet à chaque requête | Aucun cache côté serveur ni gestion d'erreur pour un fichier manquant. Pris en charge par l'équipe API ; signalé à leur backlog. La démo n'est pas affectée car l'interface lit les parquets directement. |
 | Les scripts nécessitent une exécution depuis la racine du projet | Les chemins relatifs `Path("data/…")` utilisés partout — une exécution depuis un sous-répertoire déclenche une `FileNotFoundError`. |
+| Score de durabilité pré-calculé pour France / Juin uniquement | La sélection pays/mois pilote le panier d'ingrédients EUFIC, mais ne recalcule pas le `durability_score` affiché — celui-ci reste celui de France / Juin quelle que soit la sélection (voir `ml/README.md §7.4`). |
 
 #### Feuille de route V2
 
@@ -426,13 +497,13 @@ API fetch — no other changes required.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 1 — Language                                               │
-│  Select 🇫🇷 Français or 🇬🇧 English (top-right dropdown)         │
+│  Select 🇫🇷 Français or 🇬🇧 English (sidebar (left))            │
 │  All UI strings switch immediately; ML cluster labels stay EN.   │
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Step 2 — Context                                                │
-│  Pick Country (273 options) + Month (Jan–Dec, default May).      │
+│  Pick Country (273 options) + Month (Jan–Dec, default June).     │
 │  A confidence banner appears immediately below showing whether   │
 │  EUFIC 🟢, FAOSTAT 🟡, or neither 🔴 has data for that country. │
 └────────────────────────┬────────────────────────────────────────┘
@@ -459,11 +530,27 @@ API fetch — no other changes required.
 └────────────────────────┬────────────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Step 6 — Results                                                │
-│  Top 10 recipe cards, ranked by yummy_score.                     │
-│  Each card shows: name, category, Yummy Score (+ progress bar),  │
-│  Rating, Time, Cluster badge (colour-coded), season flag 🟢/🟡,  │
-│  and an explainability caption.                                  │
+│  Step 6 — Post-generation filters                               │
+│  Slider "⏱️ Max time": 10–180 min (default 60, step 5).        │
+│  Radio "Sort by": Score Yummy · Score Durabilité ·              │
+│  Best trade-off (0.6 × Yummy + 0.4 × Durability).              │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 7 — Results overview                                      │
+│  4 aggregate metrics: recipe count · avg Yummy Score ·          │
+│  avg Durability Score · avg prep time.                          │
+│  + 2 "Understand the Score" expanders (Yummy / Durability).     │
+└────────────────────────┬────────────────────────────────────────┘
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 8 — Recipe cards                                          │
+│  Top 10 in the chosen sort order. Each card: name, category,    │
+│  medal 🥇/🥈/🥉 (ranks 1–3), Yummy Score + bar,               │
+│  Durability + badge (🌱/🌿/🟡/🔴) + bar, rating, time,        │
+│  cluster badge, season flag 🟢/🟡, caption.                    │
+│  Expander "📖 Recipe details": seasonality, agricultural        │
+│  availability, coverage (/100) + recognised ingredients.        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -539,6 +626,55 @@ and refactored in seconds.
 output (`cluster_label` column in Gold parquets) and serve as an interface
 contract between the ML and UI layers — translating them would break that
 contract and require re-labelling the parquets.
+
+### 3.6 Preparation time filter
+
+After generation, a slider lets the user restrict results by prep time:
+
+```python
+max_time = st.slider("⏱️ Temps maximum de préparation", min_value=10, max_value=180, value=60, step=5)
+cluster_results = cluster_results[cluster_results["totaltime"].fillna(999) <= max_time]
+```
+
+Recipes with `NaN` totaltime are treated as 999 min and filtered out once the
+slider falls below 999. The filter is applied before sorting.
+
+### 3.7 Results sort mode
+
+A horizontal radio with three options appears below the slider:
+
+| Option | Behaviour |
+|---|---|
+| **Score Yummy** | `sort_values("yummy_score", ascending=False)` |
+| **Score Durabilité** | `sort_values("durability_score", ascending=False)` |
+| **Meilleur compromis** | `0.6 × yummy_score + 0.4 × durability_score`, sorted descending |
+
+> **V1 note:** the "Score Durabilité" and "Meilleur compromis" sorts rely on a
+> `durability_score` pre-computed for France / June only. Changing the
+> country/month selection does not recompute this score — it only drives the
+> EUFIC basket. See `ml/README.md §7.4`.
+
+### 3.8 Results overview
+
+Shown after sorting, before the recipe cards:
+
+```python
+st.subheader("📊 Aperçu des résultats")
+# 4 columns: recipe count · avg Yummy Score · avg Durability Score · avg prep time
+```
+
+Followed by two expanders:
+- **Comprendre le Score Yummy** — component breakdown (rating, popularity, simplicity, sentiment).
+- **🌍 Comprendre le Score de Durabilité** — formula (75 % seasonality + 25 % availability, bonus ≥ 2/3).
+
+### 3.9 Recipe details expander
+
+Each recipe card has an expander `📖 Détails de la recette` that exposes:
+
+- 🌱 **Seasonality**: `seasonality_score / 100`
+- 🌾 **Agricultural availability**: `availability_score / 100`
+- 🎯 **Coverage**: `coverage_score / 100`
+- 🧺 List of recognised ingredients (`matched_ingredients`)
 
 ---
 
@@ -730,6 +866,15 @@ Changes to column names or types in Gold parquets must be reflected here.
 | `recipeid` | int64 | Join key |
 | `sentiment_percentile` | float64 | (loaded, available for future display) |
 
+**`gold_recipe_durability_scores.parquet`** (via `load_recommendations()`)
+
+| Column | Type | Used for |
+|---|---|---|
+| `durability_score` | float64 | Durability badge + progress bar |
+| `coverage_score` | float64 | (loaded, available) |
+| `seasonality_score` | float64 | (loaded, available) |
+| `availability_score` | float64 | (loaded, available) |
+
 **Silver parquets** (country/basket data, loaded cached at startup)
 
 | File | Columns read | Used for |
@@ -748,7 +893,7 @@ Changes to column names or types in Gold parquets must be reflected here.
 pip install -r requirements.txt
 ```
 
-Required Gold parquets must exist (run the ML pipeline first — see `ml/README.md §8`).
+Required Gold parquets must exist (run the ML pipeline first — see `ml/README.md §9`).
 
 ### Start the app
 
@@ -793,6 +938,7 @@ calls within the same session are instant (`@st.cache_data`).
 | 4 orphan sentiment IDs | Recipe IDs `{424301, 371545, 432898, 194165}` exist in `gold_sentiment_scores` but not in `gold_yummy_recommendations` (source `reviewcount == 0` inconsistency). They are never queried by the UI. |
 | `api/main.py` reads parquet per request | No server-side cache or graceful error handling for a missing file. Owned by the API team; flagged for their backlog. Demo is unaffected because the UI reads parquets directly. |
 | Scripts require project-root execution | Relative `Path("data/…")` paths used throughout — running from a subdirectory raises `FileNotFoundError`. |
+| Durability score pre-computed for France / June only | The country/month selection drives the EUFIC ingredient basket but does not recompute the displayed `durability_score` — it stays France / June regardless of selection (see `ml/README.md §7.4`). |
 
 ### V2 roadmap
 
