@@ -1,15 +1,28 @@
 """
 API V1.2 smoke tests — 1 test per new endpoint.
 
-Requires the project data files to be present on disk (Gold + Silver parquets).
-Run from the project root so that relative paths in api/main.py resolve correctly:
+These are integration tests: they exercise the real FastAPI app against the
+actual Gold/Silver parquets produced by the ML pipeline.  They are skipped
+automatically when those files are absent (CI runner, fresh clone).
+
+Run locally from the project root (after the ML pipeline has been run):
 
     pytest tests/test_api.py -v
+
+CI behaviour: 8 tests skipped (not failed) → CI stays green.
+Local behaviour: 8 tests run against real data → must all pass.
 """
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
-from api.main import app
+from api.main import GOLD_FILE, app
+
+pytestmark = pytest.mark.skipif(
+    not GOLD_FILE.exists(),
+    reason="Integration tests require Gold/Silver parquets on disk — run the ML pipeline first (not available in CI)",
+)
 
 client = TestClient(app)
 
