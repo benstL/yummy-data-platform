@@ -316,29 +316,39 @@ def check_duckdb() -> bool:
 
 def check_durability_gold() -> bool:
     """
-    Vérifie la cohérence du fichier Gold de durabilité.
+    Vérifie la cohérence du dataset Gold de durabilité partitionné.
+
+    Format : data/gold/gold_recipe_durability_scores/durability_country=<X>/data.parquet
+    Validation sur la partition 'france' (référence stable).
     """
 
     _header(4, "Gold Durability Score")
 
-    file_path = (
+    dataset_dir = (
         PROJECT_ROOT
         / "data"
         / "gold"
-        / "gold_recipe_durability_scores.parquet"
+        / "gold_recipe_durability_scores"
     )
 
-    if not file_path.exists():
-        _fail("gold_recipe_durability_scores.parquet introuvable")
+    if not dataset_dir.exists():
+        _fail("Répertoire gold_recipe_durability_scores/ introuvable")
+        return False
+
+    france_partition = dataset_dir / "durability_country=france" / "data.parquet"
+
+    if not france_partition.exists():
+        _fail(f"Partition france introuvable : {france_partition}")
         return False
 
     try:
         import pandas as pd
 
-        df = pd.read_parquet(file_path)
+        df = pd.read_parquet(france_partition)
 
         required_cols = {
             "recipeid",
+            "durability_month",
             "seasonality_score",
             "availability_score",
             "durability_score",
@@ -367,8 +377,12 @@ def check_durability_gold() -> bool:
             _fail("coverage_score hors bornes")
             return False
 
+        nb_partitions = sum(1 for p in dataset_dir.iterdir() if p.is_dir())
+        nb_months = df["durability_month"].nunique()
+
         _pass(
-            f"{len(df):,} recettes avec score de durabilité"
+            f"{nb_partitions} pays, {nb_months} mois, "
+            f"{len(df):,} lignes (partition france)"
         )
 
         return True

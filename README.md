@@ -42,7 +42,7 @@ Le projet suit une architecture Medallion :
 | Silver | Données nettoyées et standardisées | ✅ Opérationnel |
 | Gold | Données analytiques enrichies + score de recommandation et de durabilité | ✅ Implémentée |
 
-La couche Gold est produite par deux chemins complémentaires : le pipeline Python (`transform/gold/`, `ml/`) et le pipeline SQL (`dbt/`). → Voir `ml/README.md` pour le détail de la formule et des métriques.
+La couche Gold est produite par le pipeline Python (`transform/gold/`, `ml/`), orchestré par Airflow. Un pipeline dbt-duckdb (`dbt/`) fournit une implémentation SQL de validation croisée du `yummy_score` (hors chemin de production V1 — voir `ml/README.md §1`). → Voir `ml/README.md` pour le détail de la formule et des métriques.
 
 ---
 
@@ -64,11 +64,13 @@ Principaux endpoints :
 | `GET /quick-recipes` | Recettes rapides |
 | `GET /category/{category}` | Recettes d'une catégorie |
 
-Le fichier principal utilisé par l'API FastAPI est désormais :
+Le répertoire partitionné utilisé par l'API FastAPI est désormais :
 
 ```text
-data/gold/gold_recipe_durability_scores.parquet
+data/gold/gold_recipe_durability_scores/durability_country=<X>/data.parquet
 ```
+
+Les endpoints `/recommendations` et `/durability` acceptent les paramètres `country` et `month` (défaut : `france` / `6`). La jointure avec les recommandations s'effectue à la requête. Codes d'erreur : `404` pour pays inconnu ou sans données, `500` si colonne manquante.
 
 Documentation interactive :
 
@@ -93,9 +95,9 @@ http://localhost:8000/docs
 - Extraction de données (Kaggle, Selenium, FAO bulk)
 - Pipelines de transformation Bronze → Silver → Gold
 - Enrichissement ML : analyse de sentiment VADER, matching TF-IDF des ingrédients, clustering KMeans
-- Score de recommandation `yummy_score` (pipeline Python et pipeline dbt SQL)
+- Score de recommandation `yummy_score` (pipeline Python, orchestré Airflow ; pipeline dbt SQL en validation croisée hors prod V1)
 - Score de durabilité basé sur la saisonnalité (EUFIC) et la disponibilité agricole (FAOSTAT)
-- API FastAPI :
+- API FastAPI (v1.2 — 13 endpoints) :
   - `GET /` : vérification du service
   - `GET /health` : état de l'API et présence du fichier Gold
   - `GET /stats` : statistiques globales du dataset
@@ -105,11 +107,17 @@ http://localhost:8000/docs
   - `GET /recipe/{recipeid}` : détail d'une recette
   - `GET /quick-recipes` : recettes rapides selon un temps maximum
   - `GET /category/{category}` : recommandations par catégorie
+  - `GET /basket-recommendations?country=&month=&basket=` : filtrage par panier d'ingrédients
+  - `GET /seasonal-products?country=&month=` : produits EUFIC en saison
+  - `GET /faostat-staples?country=` : aliments de base FAOSTAT
+  - `GET /countries` : liste des pays disponibles (EUFIC ∪ FAOSTAT, booléens)
 - Interface Streamlit — sélection pays/saison, filtres cluster
-- Object store MinIO avec pipeline dbt-duckdb (couche SQL sur Silver)
+- Object store MinIO avec pipeline dbt-duckdb (validation croisée SQL du `yummy_score` sur Silver + Gold, hors prod V1)
 - CI/CD GitHub Actions (Python 3.12, pytest, ruff)
 - Audit d'intégration bout en bout — `tools/healthcheck.py`
 - Orchestration Airflow — DAG `yummy_pipeline` (Silver → Gold → upload MinIO, @daily)
+
+> **Stockage des données (V1) :** l'API (`api/main.py`) et l'interface Streamlit lisent les parquets Gold/Silver depuis le **système de fichiers local** (`data/gold/`, `data/silver/`) — sans `storage_options`, boto3 ni MinIO. MinIO est provisionné dans `docker-compose` et utilisé **exclusivement** par le pipeline dbt de validation croisée (lecture des Silver depuis `s3://yummy/silver/` et écriture de `dbt_yummy_recommendations.parquet` sur `s3://yummy/gold/`). Aucun composant applicatif (API, UI) ne lit depuis MinIO en V1. **Choix assumé :** la lecture locale garantit une démo fluide et hors-ligne. Le passage de la couche Gold sur S3/MinIO comme stockage runtime (API+UI lisant via `storage_options`) est un objectif d'industrialisation V2, activable par configuration sans changement de formule.
 
 ---
 
@@ -218,35 +226,22 @@ La couche Gold produit plusieurs jeux de données enrichis utilisés par l'API e
 | `gold_recipe_clusters.parquet` | Clusters de recettes générés par KMeans |
 | `gold_cluster_profiles.parquet` | Profils statistiques des clusters |
 | `gold_recipe_ingredient_map.parquet` | Mapping entre recettes et ingrédients |
-| `gold_recipe_durability_scores.parquet` | Scores de durabilité calculés à partir d'EUFIC et FAOSTAT |
+| `gold_recipe_durability_scores/` | Scores de durabilité partitionnés par pays (29 × 12 mois), calculés à partir d'EUFIC et FAOSTAT |
 | `gold_recipe_ingredient_matches.parquet` | Correspondances détaillées entre recettes et ingrédients reconnus |
 
-Le fichier principal utilisé par l'API FastAPI est :
+Le répertoire partitionné de durabilité utilisé par l'API FastAPI :
 
 ```text
-data/gold/gold_recipe_durability_scores.parquet
+data/gold/gold_recipe_durability_scores/durability_country=<X>/data.parquet
 ```
 
-Principales colonnes exposées :
+Colonnes durabilité exposées (jointes dynamiquement aux recommandations) :
 
-- `recipeid`
-- `name`
-- `recipecategory`
-- `totaltime`
-- `ingredient_count`
-- `aggregatedrating`
-- `reviewcount`
-- `weighted_rating`
-- `sentiment_percentile`
-- `shrunk_sentiment`
-- `rating_score`
-- `popularity_score`
-- `simplicity_score`
-- `yummy_score`
+- `durability_score`
 - `seasonality_score`
 - `availability_score`
-- `durability_score`
 - `coverage_score`
+- `durability_month`
 
 ---
 
@@ -352,7 +347,7 @@ YUMMY follows a Medallion Architecture approach:
 | Silver | Cleaned and standardized datasets | ✅ Implemented |
 | Gold | Enriched analytical datasets + recommendation and sustainability score | ✅ Implemented |
 
-The Gold layer is produced by two complementary pipelines: the Python pipeline (`transform/gold/`, `ml/`) and the SQL pipeline (`dbt/`). → See `ml/README.md` for formula details and metrics.
+The Gold layer is produced by the Python pipeline (`transform/gold/`, `ml/`), orchestrated by Airflow. A dbt-duckdb pipeline (`dbt/`) provides a SQL cross-validation implementation of `yummy_score` (outside the V1 production path — see `ml/README.md §1`). → See `ml/README.md` for formula details and metrics.
 
 ---
 
@@ -378,16 +373,18 @@ Interactive API documentation:
 http://localhost:8000/docs
 ```
 
-The main file read by the FastAPI service is:
+The partitioned directory read by the FastAPI service is:
 
 ```text
-data/gold/gold_recipe_durability_scores.parquet
+data/gold/gold_recipe_durability_scores/durability_country=<X>/data.parquet
 ```
+
+The `/recommendations` and `/durability` endpoints accept `country` and `month` query parameters (defaults: `france` / `6`). The join with recommendations is done at request time. Error codes: `404` for unknown country or no data, `500` for missing column.
 
 This dataset is generated by the ML and Gold pipeline:
 
 ```bash
-python3 tools/build_all_ml.py
+python3 transform/gold/build_gold_durability_score.py
 ```
 
 ---
@@ -408,9 +405,9 @@ python3 tools/build_all_ml.py
 - Data extraction pipelines (Kaggle, Selenium, FAO bulk)
 - Bronze → Silver → Gold transformation pipelines
 - ML enrichment: VADER sentiment analysis, TF-IDF ingredient matching, KMeans clustering
-- `yummy_score` recommendation score (Python pipeline and dbt SQL pipeline)
+- `yummy_score` recommendation score (Python pipeline orchestrated by Airflow; dbt SQL pipeline as cross-validation, outside V1 prod path)
 - Sustainability score based on ingredient seasonality (EUFIC) and agricultural availability (FAOSTAT)
-- FastAPI service:
+- FastAPI service (v1.2 — 13 endpoints):
   - `GET /`
   - `GET /health`
   - `GET /stats`
@@ -420,11 +417,17 @@ python3 tools/build_all_ml.py
   - `GET /recipe/{recipeid}`
   - `GET /quick-recipes`
   - `GET /category/{category}`
+  - `GET /basket-recommendations?country=&month=&basket=` — basket ingredient filtering
+  - `GET /seasonal-products?country=&month=` — EUFIC in-season products
+  - `GET /faostat-staples?country=` — FAOSTAT agricultural staples
+  - `GET /countries` — available countries (EUFIC ∪ FAOSTAT, boolean flags)
 - Streamlit UI — country/season selection, cluster filters
-- MinIO object store with dbt-duckdb SQL layer (Gold over Silver)
+- MinIO object store with dbt-duckdb SQL layer (cross-validation of `yummy_score` over Silver + Gold, outside V1 prod path)
 - CI/CD with GitHub Actions (Python 3.12, pytest, ruff)
 - End-to-end integration audit — `tools/healthcheck.py`
 - Airflow orchestration — DAG `yummy_pipeline` (Silver → Gold → upload MinIO, @daily)
+
+> **Data storage (V1):** the API (`api/main.py`) and the Streamlit UI read Gold/Silver parquets from the **local filesystem** (`data/gold/`, `data/silver/`) — no `storage_options`, no boto3, no MinIO. MinIO is provisioned in `docker-compose` and used **exclusively** by the dbt cross-validation pipeline (reading Silver from `s3://yummy/silver/` and writing `dbt_yummy_recommendations.parquet` to `s3://yummy/gold/`). No application component (API, UI) reads from MinIO in V1. **Deliberate choice:** local reads guarantee a smooth, offline-capable demo. Migrating the Gold layer to S3/MinIO as the runtime store (API+UI reading via `storage_options`) is a V2 industrialisation goal, activatable by configuration with no formula changes.
 
 ---
 
@@ -544,32 +547,24 @@ The Gold layer produces several enriched datasets used by the API and Streamlit 
 | `gold_recipe_clusters.parquet` | Recipe clusters generated by KMeans |
 | `gold_cluster_profiles.parquet` | Statistical profiles of recipe clusters |
 | `gold_recipe_ingredient_map.parquet` | Recipe-to-ingredient mapping |
-| `gold_recipe_durability_scores.parquet` | Sustainability scores computed from EUFIC and FAOSTAT |
+| `gold_recipe_durability_scores/` | Sustainability scores partitioned by country (29 × 12 months), computed from EUFIC and FAOSTAT |
 | `gold_recipe_ingredient_matches.parquet` | Detailed recipe-to-recognised-ingredient matches |
 
 
-Main dataset exposed by the FastAPI service:
+Main dataset exposed by the FastAPI service: `gold_yummy_recommendations.parquet`.
+Partitioned durability directory used by the FastAPI service (joined dynamically at request time):
 
 ```text
-data/gold/gold_recipe_durability_scores.parquet
+data/gold/gold_recipe_durability_scores/durability_country=<X>/data.parquet
 ```
 
-Main exposed columns :
+Durability columns exposed (dynamically joined to recommendations):
 
-- `recipeid`
-- `name`
-- `recipecategory`
-- `totaltime`
-- `ingredient_count`
-- `aggregatedrating`
-- `reviewcount`
-- `weighted_rating`
-- `sentiment_percentile`
-- `shrunk_sentiment`
-- `rating_score`
-- `popularity_score`
-- `simplicity_score`
-- `yummy_score`
+- `durability_score`
+- `seasonality_score`
+- `availability_score`
+- `coverage_score`
+- `durability_month`
 
 ---
 

@@ -135,8 +135,8 @@ def generate_seasonality() -> pd.DataFrame:
     Generate fake Silver EUFIC seasonality rows.
 
     Important:
-    - country = 'fr'
-    - this matches the durability unit tests using country='fr'
+    - country = 'france' (full name, matches real Silver EUFIC schema)
+    - this matches the durability unit tests using country='france'
     """
     products = [
         ("tomato", "vegetable", [6, 7, 8, 9]),
@@ -157,7 +157,7 @@ def generate_seasonality() -> pd.DataFrame:
                     "product_type": product_type,
                     "month": MONTH_NAMES[month_number],
                     "month_number": month_number,
-                    "country": "fr",
+                    "country": "france",
                     "is_in_season": True,
                     "confidence_score": 1.0,
                     "source": "eufic",
