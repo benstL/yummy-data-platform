@@ -18,7 +18,7 @@ import streamlit as st
 GOLD         = Path("data/gold")
 SILVER_EUFIC = Path("data/silver/eufic")
 SILVER_FAO   = Path("data/silver/faostat/qcl")
-
+DURABILITY = GOLD / "gold_recipe_durability_scores"
 # ── i18n ──────────────────────────────────────────────────────────────────────
 TEXTS: dict[str, dict[str, str]] = {
     "fr": {
@@ -353,15 +353,45 @@ span[data-baseweb="tag"] {
 # ── Data loaders ──────────────────────────────────────────────────────────────
 
 @st.cache_data
-def load_recommendations() -> pd.DataFrame:
-    """Load Gold recommendations enriched with durability scores."""
+def load_yummy_recommendations() -> pd.DataFrame:
+    """Load Gold Yummy recommendations."""
     return pd.read_parquet(
-        GOLD / "gold_recipe_durability_scores.parquet",
+        GOLD / "gold_yummy_recommendations.parquet",
         columns=[
-            "recipeid", "name", "recipecategory", "totaltime",
-            "aggregatedrating", "reviewcount", "yummy_score",
-            "seasonality_score", "availability_score",
-            "durability_score", "coverage_score",
+            "recipeid",
+            "name",
+            "recipecategory",
+            "totaltime",
+            "aggregatedrating",
+            "reviewcount",
+            "yummy_score",
+        ],
+    )
+
+
+@st.cache_data
+def load_durability_scores(country: str) -> pd.DataFrame:
+    """Load durability scores for the selected country."""
+
+    country_slug = country.lower().replace(" ", "_")
+    country_dir = DURABILITY / f"durability_country={country_slug}"
+
+    files = sorted(country_dir.glob("*.parquet"))
+
+    if not files:
+        raise FileNotFoundError(
+            f"No durability parquet found for country: {country}"
+        )
+
+    return pd.read_parquet(
+        files[-1],
+        columns=[
+            "recipeid",
+            "durability_month",
+            "seasonality_score",
+            "availability_score",
+            "durability_score",
+            "coverage_score",
         ],
     )
 
@@ -418,16 +448,24 @@ def _load_faostat_raw() -> pd.DataFrame:
 
 
 @st.cache_data
-def build_merged() -> pd.DataFrame:
-    """Left-join all four Gold parquets on recipeid into one working DataFrame."""
+def build_merged(country: str, month_number: int) -> pd.DataFrame:
+    """Join Yummy recommendations with durability scores for selected country/month."""
+
+    yummy = load_yummy_recommendations()
+
+    durability = load_durability_scores(country)
+
+    durability = durability[
+        durability["durability_month"] == month_number
+    ]
+
     return (
-        load_recommendations()
-        .merge(load_clusters(),       on="recipeid", how="left")
+        yummy
+        .merge(durability,          on="recipeid", how="left")
+        .merge(load_clusters(),     on="recipeid", how="left")
         .merge(load_ingredient_map(), on="recipeid", how="left")
-        .merge(load_sentiment(),      on="recipeid", how="left")
+        .merge(load_sentiment(),    on="recipeid", how="left")
     )
-
-
 # ── Country utilities ─────────────────────────────────────────────────────────
 
 def _eufic_to_display(internal: str) -> str:
@@ -912,7 +950,7 @@ def main() -> None:
 
     # ── 5. Filter ───────────────────────────────────────────────────────────────
     with st.spinner(texts["spinner"]):
-        merged = build_merged()
+        merged = build_merged(country,month_num)
         basket_results, is_global_fallback, is_selection_fallback = filter_by_basket(
             merged, basket, fallback_basket=seasonal_all
         )
