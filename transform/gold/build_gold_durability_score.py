@@ -38,7 +38,7 @@ def build_seasonality_reference(
     ref = eufic_df[
         (eufic_df["country"].str.lower() == country)
         & (eufic_df["month_number"] == month)
-        & (eufic_df["is_in_season"] == True)
+        & eufic_df["is_in_season"]
     ][["product_name"]].drop_duplicates()
 
     ref["seasonality_score"] = 1.0

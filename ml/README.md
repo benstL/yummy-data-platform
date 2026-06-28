@@ -602,7 +602,7 @@ python ml/clustering/recipe_clusterer.py
 python transform/gold/build_gold_durability_score.py
 
 # Validation
-pytest tests/          # 47/47 tests  (8 test_api + 20 test_matching + 12 test_sentiment + 7 test_durability)
+pytest tests/          # 47 local / 39 CI +8 skipped  (8 test_api + 20 test_matching + 12 test_sentiment + 7 test_durability)
 ```
 
 > **Note d'exécution canonique :** score de durabilité re-généré le 2026-06-28 (29 pays × 12 mois). Sentiment, clustering et yummy\_score inchangés depuis le 2026-05-28.
@@ -1310,7 +1310,7 @@ python ml/clustering/recipe_clusterer.py
 python transform/gold/build_gold_durability_score.py
 
 # Validation
-pytest tests/          # 47/47 tests  (8 test_api + 20 test_matching + 12 test_sentiment + 7 test_durability)
+pytest tests/          # 47 local / 39 CI +8 skipped  (8 test_api + 20 test_matching + 12 test_sentiment + 7 test_durability)
 ```
 
 > **Canonical run note:** durability scores re-generated 2026-06-28 (29 countries × 12 months). Sentiment, clustering, and yummy_score unchanged from 2026-05-28.

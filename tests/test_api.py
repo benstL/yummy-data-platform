@@ -12,7 +12,6 @@ Run locally from the project root (after the ML pipeline has been run):
 CI behaviour: 8 tests skipped (not failed) → CI stays green.
 Local behaviour: 8 tests run against real data → must all pass.
 """
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient

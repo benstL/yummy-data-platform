@@ -16,12 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pandas as pd
 from fastapi.testclient import TestClient
 
 from api.main import (
     _FAO_AGGREGATE_PATTERNS,
-    _EUFIC_COMPOUND_KEYS,
     _display_to_eufic_internal,
     _ingredient_hits,
     _to_ingredient_set,
@@ -208,9 +206,12 @@ def run_parity() -> list[str]:
         return hits
 
     def _st_to_set(v):
-        if v is None or isinstance(v, float): return set()
-        try: return set(v)
-        except TypeError: return set()
+        if v is None or isinstance(v, float):
+            return set()
+        try:
+            return set(v)
+        except TypeError:
+            return set()
 
     st_mask = df["matched_ingredients"].apply(
         lambda v: bool(_st_hits(_st_to_set(v), TEST_BASKET))
@@ -219,17 +220,17 @@ def run_parity() -> list[str]:
 
     basket_ok = api_count == st_count == 3711
     label = ok if basket_ok else fail
-    print(f"  basket=['apricot','artichoke','aubergine'], France/June")
+    print("  basket=['apricot','artichoke','aubergine'], France/June")
     print(f"  {label(f'API={api_count}   Streamlit={st_count}   Expected=3711')}")
 
     if not basket_ok:
         divergences.append(f"(a) basket count: API={api_count}, ST={st_count}, expected=3711")
 
     print(f"\n  {YELLOW}Design note:{RESET} Streamlit filter_by_basket has a Tier-2 seasonal")
-    print(f"  fallback (basket empty → retry with EUFIC seasonal list). The API")
-    print(f"  collapses Tier-2+3 into a single global top-N fallback. This only")
-    print(f"  matters when a non-empty basket returns zero matches; for non-empty")
-    print(f"  baskets with results the behaviour is identical.")
+    print("  fallback (basket empty → retry with EUFIC seasonal list). The API")
+    print("  collapses Tier-2+3 into a single global top-N fallback. This only")
+    print("  matters when a non-empty basket returns zero matches; for non-empty")
+    print("  baskets with results the behaviour is identical.")
 
     # ── (b) EUFIC compound key mapping ──────────────────────────────────────
     print(f"\n{BOLD}(b) /seasonal-products — country key mapping (_EUFIC_COMPOUND_KEYS){RESET}")
@@ -249,13 +250,11 @@ def run_parity() -> list[str]:
         ("germany",       "germany"),
     ]
 
-    all_ok = True
     for inp, expected in cases:
         api_r = _display_to_eufic_internal(inp)
         st_r  = st_display_to_internal(inp)
         ok_api = api_r == expected
         if not ok_api:
-            all_ok = False
             divergences.append(f"(b) EUFIC key: input={inp!r}, API={api_r!r}, expected={expected!r}")
         mark = ok("OK") if ok_api else fail(f"API={api_r!r} expected={expected!r}")
         print(f"  {inp!r:<22} ST={st_r!r:<18} {mark}")
@@ -323,8 +322,8 @@ def run_parity() -> list[str]:
     print(f"  {'Total':<10} {total:<14} {len(all_st):<18} {ok('OK') if total==len(all_st) else fail('DIFF')}")
     print()
     print(f"  {YELLOW}Format note:{RESET} API returns lowercase internal keys ('czechrepublic'),")
-    print(f"  Streamlit uses display names ('Czech Republic'). Logic is equivalent;")
-    print(f"  a UI client calls .title() / EUFIC_DISPLAY_MAP for display.")
+    print("  Streamlit uses display names ('Czech Republic'). Logic is equivalent;")
+    print("  a UI client calls .title() / EUFIC_DISPLAY_MAP for display.")
 
     if not count_ok:
         divergences.append(
