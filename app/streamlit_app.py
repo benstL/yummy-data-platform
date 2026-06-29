@@ -448,10 +448,34 @@ def load_durability_scores(country: str) -> pd.DataFrame:
 
     country_slug = country.lower().replace(" ", "_")
     country_dir = DURABILITY / f"durability_country={country_slug}"
+    legacy_file = GOLD / "gold_recipe_durability_scores.parquet"
 
     files = sorted(country_dir.glob("*.parquet"))
 
     if not files:
+        if legacy_file.exists():
+            legacy = pd.read_parquet(
+                legacy_file,
+                columns=[
+                    "recipeid",
+                    "durability_month",
+                    "seasonality_score",
+                    "availability_score",
+                    "durability_score",
+                    "coverage_score",
+                    "durability_country",
+                ],
+            )
+            legacy_country = country.lower().replace(" ", "")
+            legacy = legacy[
+                legacy["durability_country"]
+                .astype(str)
+                .str.lower()
+                .str.replace(" ", "", regex=False)
+                == legacy_country
+            ].copy()
+            return legacy.drop(columns=["durability_country"], errors="ignore")
+
         return pd.DataFrame(
             columns=[
                 "recipeid",
