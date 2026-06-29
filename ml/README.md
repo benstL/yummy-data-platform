@@ -37,10 +37,10 @@ flowchart LR
 
     subgraph Gold["Gold Layer  (data/gold/)"]
         GS[gold_sentiment_scores]
-        GIM[gold_ingredient_matches\ngold_recipe_ingredient_map]
+        GIM[gold_ingredient_matches\ngold_recipe_ingredient_map\ngold_recipe_ingredient_matches]
         GR[gold_yummy_recommendations]
         GC[gold_recipe_clusters\ngold_cluster_profiles]
-        GD[gold_recipe_durability_scores]
+        GD[gold_recipe_durability_scores/\ndurability_country=* ← répertoire]
     end
 
     APP[Streamlit UI\napp/streamlit_app.py]
@@ -58,7 +58,6 @@ flowchart LR
     GR --> CLUST
     CLUST --> GC
     GIM --> DURA
-    GR --> DURA
     SE -->|seasonality| DURA
     SF -->|production| DURA
     DURA --> GD
@@ -76,8 +75,29 @@ Step 1  ml/matching/ingredient_matcher.py          ← no ML deps
 Step 2  ml/sentiment/sentiment_analyzer.py         ← no ML deps
 Step 3  transform/gold/build_gold_yummy_recommendations.py  ← needs Step 2 output
 Step 4  ml/clustering/recipe_clusterer.py          ← needs Steps 1, 3
-Step 5  transform/gold/build_gold_durability_score.py       ← needs Steps 1, 3 output
+Step 5  transform/gold/build_gold_durability_score.py       ← needs Step 1 output
 ```
+
+#### Rôle de dbt (couche Gold)
+
+> **dbt-duckdb** fournit une implémentation SQL de référence du `yummy_score`
+> (`yummy_recommendations.sql`, materialized external →
+> `s3://yummy/gold/dbt_yummy_recommendations.parquet`), distincte de la sortie
+> Python (`gold_yummy_recommendations.parquet`) consommée par l'API et Streamlit.
+> Deux modèles de staging (`stg_recipes`, `stg_sentiment`) exposent les parquets
+> Silver/Gold en vues virtuelles.
+>
+> **Objectif assumé : validation croisée** de la formule (même calcul, deux moteurs
+> indépendants) + 10 contrats de qualité (`not_null`, `unique`,
+> `accepted_range 0–100`). dbt n'est volontairement **pas** dans le chemin de
+> production V1 : Airflow orchestre uniquement les scripts Python. Son intégration
+> au DAG est un objectif V2. La durabilité est 100 % Python — dbt n'y touche pas.
+>
+> **Validation croisée vérifiée** — 275 028 recettes, 91,7 % de `yummy_score`
+> identiques entre les deux moteurs ; écarts restants = 0,01 max (arrondi
+> flottant pandas `ROUND` vs DuckDB `round`, ordre d'opérations différent).
+> Méthode : ré-exécution SQL via DuckDB sur parquets locaux (MinIO hors ligne
+> au moment du test). Formule non divergente — validation croisée concluante.
 
 ---
 
@@ -510,32 +530,36 @@ bonus = +10 si ≥ 2/3 des ingrédients reconnus ont ingredient_durability_score
 
 | Source | Fichier |
 |---|---|
-| Gold — recommandations | `gold_yummy_recommendations.parquet` |
 | Gold — correspondances | `gold_recipe_ingredient_matches.parquet` |
 | Silver — saisonnalité | `silver_seasonality_*.parquet` (EUFIC) |
 | Silver — production | `silver_faostat_qcl_production_*.parquet` (FAOSTAT) |
 
-#### 7.3 Schéma de sortie — `gold_recipe_durability_scores.parquet` (275 028 lignes)
+#### 7.3 Schéma de sortie — `gold_recipe_durability_scores/` (répertoire partitionné)
+
+Format : **répertoire Hive** `gold_recipe_durability_scores/durability_country=<X>/data.parquet`.
+`durability_country` est la clé de partition (dans le chemin du répertoire), pas une colonne.
+Périmètre : 29 pays EUFIC × 12 mois ; la jointure avec les recommandations s'effectue à l'API et dans Streamlit au moment de la requête.
 
 | Colonne | Type | Notes |
 |---|---|---|
 | `recipeid` | int64 | Clé primaire |
-| `name` | str | Nom de la recette |
-| `yummy_score` | float64 | Score YUMMY de recommandation |
+| `durability_month` | int64 | Mois de calcul [1–12] |
+| `recognized_ingredient_count` | int64 | Ingrédients reconnus (source ≠ "unmatched") |
+| `total_ingredient_tokens` | int64 | Nombre total de tokens d'ingrédients dans la recette |
+| `matched_ingredient_tokens` | int64 | Tokens appariés à un terme de référence |
 | `seasonality_score` | float64 | % d'ingrédients reconnus en saison × 100 |
 | `availability_score` | float64 | Disponibilité agricole moyenne × 100 |
 | `durability_mean` | float64 | Moyenne brute (0,75 × sais. + 0,25 × dispo.) × 100 |
 | `positive_durability_ratio` | float64 | % d'ingrédients à durabilité positive × 100 |
 | `durability_score` | float64 | Score final [0, 100] avec bonus |
 | `coverage_score` | float64 | % de tokens d'ingrédients reconnus × 100 |
+| `durability_processed_at` | str | Horodatage UTC ISO-8601 |
 
-#### 7.4 Limite V1 — couple de référence fixe
+#### 7.4 Périmètre de couverture — résolu en V1.1
 
-`main()` est figé sur `country="france"`, `month=6` (valeurs par défaut, ligne 192 du fichier). Le DAG Airflow appelle le script **sans argument** (`dags/yummy_pipeline.py`, ligne 45), ce qui revient à exécuter systématiquement `main(country="france", month=6)`.
+**Résolu (commit `6f9cbdd`) :** `main()` parcourt désormais les 29 pays EUFIC × 12 mois et écrit un répertoire partitionné. La jointure avec les recommandations s'effectue dynamiquement à l'API (`load_durability_data(country, month)`) et dans Streamlit (`load_durability_scores(country)`, filtré sur `durability_month`).
 
-**Conséquence UI :** la sélection pays/mois dans Streamlit pilote le panier d'ingrédients saisonniers EUFIC, mais **ne recalcule pas** le `durability_score` affiché — celui-ci reste celui de France / Juin quelle que soit la sélection.
-
-**Point V2 identifié :** les trois fonctions de calcul (`build_seasonality_reference`, `build_availability_reference`, `compute_durability_scores`) sont **pures** — elles n'effectuent aucun I/O caché et peuvent être appelées directement depuis Streamlit avec les valeurs des widgets, via un `@st.cache_data` paramétré sur `(country, month)`.
+**Dernière génération :** 2026-06-28 — 29 partitions pays × 12 mois chacune.
 
 ---
 
@@ -574,9 +598,14 @@ python transform/gold/build_gold_yummy_recommendations.py
 # Step 4 — Clustering (~2 min for elbow k=2..8, requires Steps 1 & 3)
 python ml/clustering/recipe_clusterer.py
 
-# Step 5 — Durability scoring (< 30 s, requires Steps 1 & 3 output)
+# Step 5 — Durability scoring (29 pays × 12 mois, requires Step 1 output)
 python transform/gold/build_gold_durability_score.py
+
+# Validation
+pytest tests/          # 47 local / 39 CI +8 skipped  (8 test_api + 20 test_matching + 12 test_sentiment + 7 test_durability)
 ```
+
+> **Note d'exécution canonique :** score de durabilité re-généré le 2026-06-28 (29 pays × 12 mois). Sentiment, clustering et yummy\_score inchangés depuis le 2026-05-28.
 
 #### Graphe de dépendances — quand relancer
 
@@ -616,12 +645,12 @@ Durability formula changed?        →  Step 5 only
 | Biais de positivité de VADER | Corrigé par classement en percentile ; score brut peu informatif | §3.2 |
 | Aucune similarité recette à recette | Impossible de recommander « similaire à X » | — |
 | FAOSTAT utilisé comme proxy de disponibilité, non de saisonnalité | Niveau 🟡 = signal plus faible | §8 |
-| Score de durabilité pré-calculé pour France / Juin uniquement | Le `durability_score` affiché dans l'UI est invariant au changement de pays/mois — la sélection pilote le panier EUFIC, pas ce score. | §7.4 |
 | Clusters k=5 entraînés une fois ; étiquettes non mises à jour en cas de changement de données | Étiquettes obsolètes si la distribution des recettes évolue | §5 |
 | Cas limite préfixe inverse dans le filtre morphologique | Le token `"bel"` passe le filtre vis-à-vis de `"bell pepper"` (diff de longueur = 1). Rare — aucun ingrédient courant ne s'abrège ainsi en anglais. Correction V2 : préfixe inverse en longueur exacte ou seuil relevé pour les tokens courts. | §4.3 |
 | 4 ID de recettes orphelins dans `gold_sentiment_scores` | ID `{424301, 371545, 432898, 194165}` ont des scores VADER mais `reviewcount == 0` dans les recettes Silver (incohérence des données sources). Exclus de `gold_yummy_recommendations`, jamais interrogés. Aucune action requise pour V1. | §3 |
-| `api/main.py` lit le parquet à chaque requête sans cache ni gestion d'erreurs | Latence accrue en charge ; parquet manquant → 500 non géré. Signalé au backlog de l'équipe API. Pas bloquant pour la démo — la démo utilise des lectures directes de parquets via Streamlit. | — |
+| `api/main.py` lit la partition durabilité à chaque requête, sans cache côté serveur | Latence accrue en charge. Gestion d'erreurs basique : 404 pour pays inconnu, 500 si colonne manquante. La démo utilise des lectures directes de parquets via Streamlit. | — |
 | Les scripts nécessitent une exécution depuis la racine du projet | Les chemins relatifs `Path("data/…")` échouent si les scripts sont exécutés depuis un sous-répertoire. | §9 |
+| Stockage local, pas S3 runtime | L'API (`api/main.py`) et Streamlit lisent `data/gold/` et `data/silver/` en local, sans `storage_options` ni boto3. MinIO est réservé au pipeline dbt de validation croisée (`s3://yummy/`). Migration vers S3/MinIO comme stockage runtime = V2, activable par config sans changement de formule. | — |
 
 #### Feuille de route V2
 
@@ -692,10 +721,10 @@ flowchart LR
 
     subgraph Gold["Gold Layer  (data/gold/)"]
         GS[gold_sentiment_scores]
-        GIM[gold_ingredient_matches\ngold_recipe_ingredient_map]
+        GIM[gold_ingredient_matches\ngold_recipe_ingredient_map\ngold_recipe_ingredient_matches]
         GR[gold_yummy_recommendations]
         GC[gold_recipe_clusters\ngold_cluster_profiles]
-        GD[gold_recipe_durability_scores]
+        GD[gold_recipe_durability_scores/\ndurability_country=* ← directory]
     end
 
     APP[Streamlit UI\napp/streamlit_app.py]
@@ -713,7 +742,6 @@ flowchart LR
     GR --> CLUST
     CLUST --> GC
     GIM --> DURA
-    GR --> DURA
     SE -->|seasonality| DURA
     SF -->|production| DURA
     DURA --> GD
@@ -731,8 +759,29 @@ Step 1  ml/matching/ingredient_matcher.py          ← no ML deps
 Step 2  ml/sentiment/sentiment_analyzer.py         ← no ML deps
 Step 3  transform/gold/build_gold_yummy_recommendations.py  ← needs Step 2 output
 Step 4  ml/clustering/recipe_clusterer.py          ← needs Steps 1, 3
-Step 5  transform/gold/build_gold_durability_score.py       ← needs Steps 1, 3 output
+Step 5  transform/gold/build_gold_durability_score.py       ← needs Step 1 output
 ```
+
+#### Role of dbt (Gold layer)
+
+> **dbt-duckdb** provides a SQL reference implementation of `yummy_score`
+> (`yummy_recommendations.sql`, materialized external →
+> `s3://yummy/gold/dbt_yummy_recommendations.parquet`), distinct from the Python
+> output (`gold_yummy_recommendations.parquet`) consumed by the API and Streamlit.
+> Two staging models (`stg_recipes`, `stg_sentiment`) expose Silver/Gold parquets
+> as virtual views.
+>
+> **Stated goal: cross-validation** of the formula (same computation, two independent
+> engines) + 10 quality contracts (`not_null`, `unique`, `accepted_range 0–100`).
+> dbt is deliberately **not** in the V1 production path: Airflow orchestrates only
+> Python scripts. DAG integration is a V2 objective. Durability scoring is 100 %
+> Python — dbt does not touch it.
+>
+> **Cross-validation verified** — 275,028 recipes, 91.7 % of `yummy_score` values
+> identical across both engines; remaining deltas = 0.01 max (floating-point
+> rounding: pandas `ROUND` vs DuckDB `round`, different operation order).
+> Method: SQL re-execution via DuckDB on local parquets (MinIO offline at test
+> time). No formula divergence — cross-validation conclusive.
 
 ---
 
@@ -1187,32 +1236,36 @@ bonus = +10 if ≥ 2/3 of recognised ingredients have ingredient_durability_scor
 
 | Source | File |
 |---|---|
-| Gold — recommendations | `gold_yummy_recommendations.parquet` |
 | Gold — matches | `gold_recipe_ingredient_matches.parquet` |
 | Silver — seasonality | `silver_seasonality_*.parquet` (EUFIC) |
 | Silver — production | `silver_faostat_qcl_production_*.parquet` (FAOSTAT) |
 
-### 7.3 Output schema — `gold_recipe_durability_scores.parquet` (275,028 rows)
+### 7.3 Output schema — `gold_recipe_durability_scores/` (partitioned directory)
+
+Format: **Hive directory** `gold_recipe_durability_scores/durability_country=<X>/data.parquet`.
+`durability_country` is the partition key (in the directory path), not a column.
+Coverage: 29 EUFIC countries × 12 months; join with recommendations is done at request time by the API and Streamlit.
 
 | Column | Type | Notes |
 |---|---|---|
 | `recipeid` | int64 | Primary key |
-| `name` | str | Recipe name |
-| `yummy_score` | float64 | YUMMY recommendation score |
+| `durability_month` | int64 | Computation month [1–12] |
+| `recognized_ingredient_count` | int64 | Recognised ingredients (source ≠ "unmatched") |
+| `total_ingredient_tokens` | int64 | Total ingredient tokens in the recipe |
+| `matched_ingredient_tokens` | int64 | Tokens matched to a reference term |
 | `seasonality_score` | float64 | % recognised ingredients in season × 100 |
 | `availability_score` | float64 | Mean agricultural availability × 100 |
 | `durability_mean` | float64 | Raw mean (0.75 × seas. + 0.25 × avail.) × 100 |
 | `positive_durability_ratio` | float64 | % ingredients with positive durability × 100 |
 | `durability_score` | float64 | Final score [0, 100] with bonus |
 | `coverage_score` | float64 | % ingredient tokens recognised × 100 |
+| `durability_processed_at` | str | UTC ISO-8601 timestamp |
 
-### 7.4 V1 limitation — fixed reference pair
+### 7.4 Coverage scope — resolved in V1.1
 
-`main()` is hard-coded to `country="france"`, `month=6` (default values, line 192 of the file). The Airflow DAG calls the script **without arguments** (`dags/yummy_pipeline.py`, line 45), which always executes `main(country="france", month=6)`.
+**Resolved (commit `6f9cbdd`):** `main()` now iterates over all 29 EUFIC countries × 12 months and writes a partitioned directory. The join with recommendations is done dynamically at the API (`load_durability_data(country, month)`) and in Streamlit (`load_durability_scores(country)`, filtered on `durability_month`).
 
-**UI consequence:** the country/month selection in Streamlit drives the EUFIC seasonal ingredient basket but **does not recompute** the displayed `durability_score` — it always reflects France / June regardless of what the user selects.
-
-**Identified V2 item:** the three computation functions (`build_seasonality_reference`, `build_availability_reference`, `compute_durability_scores`) are **pure** — they perform no hidden I/O and can be called directly from Streamlit with widget values, via a `@st.cache_data` keyed on `(country, month)`.
+**Last generated:** 2026-06-28 — 29 country partitions × 12 months each.
 
 ---
 
@@ -1253,9 +1306,14 @@ python transform/gold/build_gold_yummy_recommendations.py
 # Step 4 — Clustering (~2 min for elbow k=2..8, requires Steps 1 & 3)
 python ml/clustering/recipe_clusterer.py
 
-# Step 5 — Durability scoring (< 30 s, requires Steps 1 & 3 output)
+# Step 5 — Durability scoring (29 countries × 12 months, requires Step 1 output)
 python transform/gold/build_gold_durability_score.py
+
+# Validation
+pytest tests/          # 47 local / 39 CI +8 skipped  (8 test_api + 20 test_matching + 12 test_sentiment + 7 test_durability)
 ```
+
+> **Canonical run note:** durability scores re-generated 2026-06-28 (29 countries × 12 months). Sentiment, clustering, and yummy_score unchanged from 2026-05-28.
 
 ### Dependency graph — when to re-run
 
@@ -1295,12 +1353,12 @@ Durability formula changed?        →  Step 5 only
 | VADER positivity bias | Fixed via percentile rank; raw score uninformative | §3.2 |
 | No recipe-to-recipe similarity | Cannot recommend "similar to X" | — |
 | FAOSTAT used as availability proxy, not seasonality | 🟡 tier is weaker signal | §8 |
-| Durability score pre-computed for France / June only | The displayed `durability_score` is invariant to country/month changes — the selection drives the EUFIC basket, not this score. | §7.4 |
 | k=5 clusters trained once; labels not updated on data changes | Stale labels if recipe distribution shifts | §5 |
 | Reverse-prefix edge case in morphological guard | Token `"bel"` passes the guard vs `"bell pepper"` (len diff = 1). Rare — no common English ingredient abbreviates this way. V2 fix: tighten reverse-prefix to exact-length or raise threshold for short tokens. | §4.3 |
 | 4 orphan recipe IDs in `gold_sentiment_scores` | IDs `{424301, 371545, 432898, 194165}` have VADER scores but `reviewcount == 0` in Silver recipes (source-data inconsistency). They are excluded from `gold_yummy_recommendations` and never surface in any query. No action needed for V1. | §3 |
-| `api/main.py` reads parquet on every request with no cache or error handling | Latency increases under load; missing parquet returns unhandled 500. Flagged for the API team's backlog. Not a demo blocker — the demo uses direct parquet reads via Streamlit. | — |
+| `api/main.py` reads durability partition on every request, no server-side cache | Latency increases under load. Basic error handling: 404 for unknown country, 500 for missing column. Demo uses direct parquet reads via Streamlit. | — |
 | Scripts require project-root execution | Relative `Path("data/…")` paths fail if scripts are run from a subdirectory. | §9 |
+| Local storage, no S3 runtime | The API (`api/main.py`) and Streamlit read `data/gold/` and `data/silver/` from the local filesystem, without `storage_options` or boto3. MinIO is reserved for the dbt cross-validation pipeline (`s3://yummy/`). Migration to S3/MinIO as the runtime store is a V2 goal, activatable by configuration with no formula changes. | — |
 
 ### V2 roadmap
 

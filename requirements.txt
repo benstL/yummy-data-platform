@@ -33,3 +33,4 @@ dbt-duckdb==1.9.6
 
 # --- Tests ---
 pytest==9.0.3
+httpx==0.28.1

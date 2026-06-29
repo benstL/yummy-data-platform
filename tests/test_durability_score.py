@@ -23,7 +23,7 @@ def durability_df(eufic_df, faostat_df):
 
     seasonality_ref = build_seasonality_reference(
         eufic_df,
-        country="fr",
+        country="france",
         month=6,
     )
 

@@ -27,9 +27,17 @@ L'interface YUMMY est une application Streamlit monopage qui recommande des rece
 | Démo hors ligne | Fonctionne sans réseau | Nécessite une API en cours d'exécution |
 | Observabilité | Aucune | Middleware API pour la journalisation des requêtes et le suivi de la latence |
 
-Le FastAPI (`api/main.py`) existe et expose `GET /recommendations`.
+Le FastAPI (`api/main.py`) existe et expose `GET /recommendations`, enrichi de la durabilité (pays × mois) depuis le commit de Sarah. Il couvre 2 des 5 sources agrégées par `build_merged()` : recommandations et durabilité. Les 3 sources restantes (clusters, carte d'ingrédients, panier saisonnier) sont lues directement par Streamlit.
 `app/streamlit_app.py` est intentionnellement découplé pour la stabilité de la démo.
-Le chemin de migration V2 consiste à remplacer l'appel `build_merged()` par une requête API — aucune autre modification requise.
+
+**Chemin de migration V2 (5 chantiers, pas un drop-in) :** servir l'app entièrement via l'API nécessite :
+1. `GET /basket-recommendations?country=&month=&basket=` — filtrage sur `matched_ingredients`, retournant aussi `cluster_label` et `matched_ingredients` dans le payload ;
+2. `GET /seasonal-products?country=&month=` — produits EUFIC en saison (aujourd'hui lu depuis Silver) ;
+3. `GET /faostat-staples?country=` — aliments de base FAOSTAT (aujourd'hui lu depuis Silver) ;
+4. `GET /countries` — liste des pays disponibles (EUFIC ∪ FAOSTAT) ;
+5. Ajout de `cluster_label` et `matched_ingredients` au join interne de l'API.
+
+La logique panier (intersection EUFIC×mois / FAOSTAT, bandeau de confiance) reste aujourd'hui côté Streamlit.
 
 ---
 
@@ -175,7 +183,7 @@ Un radio à 3 options (horizontal) apparaît après le slider :
 | **Score Durabilité** | `sort_values("durability_score", ascending=False)` |
 | **Meilleur compromis** | `0.6 × yummy_score + 0.4 × durability_score`, trié décroissant |
 
-> **Note V1 :** les tris « Score Durabilité » et « Meilleur compromis » s'appuient sur `durability_score` pré-calculé pour France / Juin uniquement. La sélection pays/mois ne recalcule pas ce score — elle pilote uniquement le panier EUFIC. Voir `ml/README.md §7.4`.
+> **Note :** les tris « Score Durabilité » et « Meilleur compromis » s'appuient sur `durability_score` chargé depuis la partition `durability_country=<pays>` pour le mois sélectionné — le score reflète le pays et le mois de l'utilisateur (voir `ml/README.md §7.4`).
 
 #### 3.8 Aperçu des résultats
 
@@ -375,14 +383,16 @@ Les colonnes listées ici constituent l'**interface entre le pipeline ML et l'in
 | `recipeid` | int64 | Clé de jointure |
 | `sentiment_percentile` | float64 | (chargé, disponible pour affichage futur) |
 
-**`gold_recipe_durability_scores.parquet`** (via `load_recommendations()`)
+**`gold_recipe_durability_scores/durability_country=<X>/data.parquet`** (via `load_durability_scores(country)`, filtré sur `durability_month`)
 
 | Colonne | Type | Utilisé pour |
 |---|---|---|
+| `recipeid` | int64 | Clé de jointure |
+| `durability_month` | int64 | Filtre par mois sélectionné |
 | `durability_score` | float64 | Badge durabilité + barre de progression |
-| `coverage_score` | float64 | (chargé, disponible) |
-| `seasonality_score` | float64 | (chargé, disponible) |
-| `availability_score` | float64 | (chargé, disponible) |
+| `coverage_score` | float64 | Affiché dans les détails de la recette |
+| `seasonality_score` | float64 | Affiché dans les détails de la recette |
+| `availability_score` | float64 | Affiché dans les détails de la recette |
 
 **Parquets Silver** (données pays/panier, chargés en cache au démarrage)
 
@@ -426,7 +436,9 @@ L'application Streamlit **n'appelle pas** le FastAPI en V1. Les deux peuvent tou
 
 #### Comportement au démarrage à froid
 
-Au premier clic sur le bouton, `build_merged()` charge et joint quatre parquets (~275K lignes au total). Cela prend 1–3 secondes au premier appel ; les appels suivants dans la même session sont instantanés (`@st.cache_data`).
+Au premier clic sur le bouton, `build_merged()` charge et joint quatre parquets (~275K lignes au total) ; `load_durability_scores(country)` charge en parallèle la partition `durability_country=<pays>/data.parquet`. Cela prend 1–3 secondes au premier appel ; les appels suivants dans la même session sont instantanés (`@st.cache_data`).
+
+Pour analyser le dataset de durabilité hors Streamlit : `python tools/analyze_durability_duckdb.py` (requêtes DuckDB sur les 29 partitions, exports CSV dans `reports/metrics/`).
 
 ---
 
@@ -443,17 +455,64 @@ Au premier clic sur le bouton, `build_merged()` charge et joint quatre parquets 
 | `@st.cache_data` à portée de session | Plusieurs utilisateurs simultanés chargent chacun leur propre copie des 275K lignes |
 | Cas limite préfixe inverse dans le filtre morphologique | Le token `"bel"` (ex. : issu de « Bel Paese cheese ») passe le garde morphologique de l'ingredient-matcher et se retrouve dans `matched_ingredients` comme `"bell pepper"`. Rare en pratique ; la correction V2 est un garde plus strict ou un NER au niveau des expressions (`ml/README.md §4.3`). |
 | 4 ID de sentiment orphelins | Les IDs de recettes `{424301, 371545, 432898, 194165}` existent dans `gold_sentiment_scores` mais pas dans `gold_yummy_recommendations` (incohérence `reviewcount == 0` dans les sources). Jamais interrogés par l'interface. |
-| `api/main.py` lit le parquet à chaque requête | Aucun cache côté serveur ni gestion d'erreur pour un fichier manquant. Pris en charge par l'équipe API ; signalé à leur backlog. La démo n'est pas affectée car l'interface lit les parquets directement. |
+| `api/main.py` lit la partition durabilité à chaque requête | Aucun cache côté serveur. Gestion d'erreurs : 404 pour pays inconnu ou sans données, 500 si colonne manquante. La démo n'est pas affectée car l'interface lit les parquets directement. |
 | Les scripts nécessitent une exécution depuis la racine du projet | Les chemins relatifs `Path("data/…")` utilisés partout — une exécution depuis un sous-répertoire déclenche une `FileNotFoundError`. |
-| Score de durabilité pré-calculé pour France / Juin uniquement | La sélection pays/mois pilote le panier d'ingrédients EUFIC, mais ne recalcule pas le `durability_score` affiché — celui-ci reste celui de France / Juin quelle que soit la sélection (voir `ml/README.md §7.4`). |
+| Stockage local, pas S3 runtime | L'API et Streamlit lisent `data/gold/` et `data/silver/` en local. MinIO est réservé au pipeline dbt de validation croisée (`s3://yummy/`). Migration vers S3/MinIO comme stockage runtime = V2, activable par config. |
 
 #### Feuille de route V2
 
-1. **Mode piloté par API** — remplacer `build_merged()` par `GET /recommendations?basket=…` pour ajouter la mise en cache côté serveur, la déduplication des requêtes et l'observabilité.
+1. **Mode piloté par API** — remplacer les lectures directes de parquets par 5 nouveaux endpoints (voir §1) : `GET /basket-recommendations?basket=`, `GET /seasonal-products`, `GET /faostat-staples`, `GET /countries`, plus l'ajout de `cluster_label` et `matched_ingredients` au join interne. Gain : mise en cache côté serveur, déduplication des requêtes, observabilité.
 2. **Traduction des noms de recettes** — noms d'affichage en français via l'API DeepL en batch (traduire une fois, mettre en cache dans un parquet).
 3. **Panier enrichi** — afficher le contexte nutritionnel (calories, protéines) aux côtés du statut saisonnier ; nécessite la jointure d'un parquet nutritionnel supplémentaire.
 4. **Persistance des préférences utilisateur** — `st.session_state` + stockage local du navigateur via `streamlit-js-eval` pour mémoriser le pays/la langue entre les sessions.
 5. **Pagination** — afficher plus que le top 10 avec `st.pagination` (Streamlit ≥ 1.37).
+
+---
+
+### 9. API — couverture vérifiée (v1.2)
+
+> **Cadrage.** L'API v1.2 expose **100 % des données** consommées par `build_merged()` (5 sources). Streamlit lit le Gold en direct **par choix de fluidité démo** (`@st.cache_data`, zéro réseau requis) ; le branchement UI→API est le premier chantier V2 (voir §1 et §8).
+
+#### Matrice de couverture — 10/10 endpoints verts
+
+| Endpoint | HTTP | Vérifié par |
+|---|---|---|
+| `GET /recommendations` | 200 | `cluster_label` + `matched_ingredients` présents dans le payload |
+| `GET /basket-recommendations` (panier renseigné) | 200 | recettes matchées retournées |
+| `GET /basket-recommendations` (panier vide) | 200 | fallback top-N déclenché |
+| `GET /basket-recommendations` (pays inconnu) | 404 | 404 propre |
+| `GET /seasonal-products` | 200 | `product_name` + `is_in_season` présents |
+| `GET /seasonal-products` (pays inconnu) | 404 | 404 propre |
+| `GET /faostat-staples` | 200 | `production_value` présent, ≤ top\_n lignes |
+| `GET /faostat-staples` (pays inconnu) | 404 | 404 propre |
+| `GET /countries` | 200 | 248 entrées, booleans `eufic`/`faostat` typés |
+| `GET /health` (champs v1.2) | 200 | 4 nouveaux champs de santé présents |
+
+Preuve reproductible : `python tools/prove_api_coverage.py` (depuis la racine du projet).
+
+#### Parité logique API ≡ Streamlit
+
+| Point | Résultat |
+|---|---|
+| **Basket France/Juin, panier `['apricot','artichoke','aubergine']`** | API = 3 711 recettes, Streamlit = 3 711 — **identiques** |
+| **`_ingredient_hits`** | Substring bidirectionnel (`b in i or i in b`) copié verbatim depuis `streamlit_app.py` |
+| **`_FAO_AGGREGATE_PATTERNS`** | Tuple identique : `("primary", " total", ", total", "poultry", " meat", "equivalent", "oilcrop")` — 0 agrégat dans le top |
+| **`GET /countries`** | 29 🟢 (EUFIC) + 219 🟡 (FAOSTAT uniquement) = 248 — correspond exactement au bandeau de confiance Streamlit |
+
+#### Nuances assumées (choix de conception, pas des écarts)
+
+**a) Fallback panier**
+
+Streamlit implémente 3 niveaux :
+1. Intersection panier × `matched_ingredients`
+2. Si vide : nouvelle tentative avec le panier saisonnier complet (fallback saisonnier)
+3. Si toujours vide : top-N global
+
+L'API collapse les niveaux 2 et 3 en un unique fallback top-N global. Sans impact sur les paniers avec résultats (cas normal) ; **simplification API assumée**, documentée ici pour traçabilité.
+
+**b) Casse des clés pays**
+
+L'API retourne les clés internes minuscules (`"czechrepublic"`, `"france"`) — ce sont les valeurs à passer aux autres endpoints. Streamlit utilise des display names en casse titre (`"Czech Republic"`, `"France"`) pour l'affichage UI. **Équivalence logique**, différence de présentation uniquement. Un mapping display↔interne (via `EUFIC_DISPLAY_MAP`) resterait à ajouter si l'UI consommait l'API directement (chantier V2).
 
 ---
 ---
@@ -485,10 +544,17 @@ of seasonal ingredients.
 | Offline demo | Works without network | Requires running API |
 | Observability | None | API middleware for request logging, latency tracking |
 
-The FastAPI (`api/main.py`) exists and exposes `GET /recommendations`.
+The FastAPI (`api/main.py`) exists and exposes `GET /recommendations`, enriched with durability scores (country × month) since Sarah's commit. It covers 2 of the 5 sources aggregated by `build_merged()`: recommendations and durability. The remaining 3 sources (clusters, ingredient map, seasonal basket) are read directly by Streamlit.
 `app/streamlit_app.py` is intentionally decoupled for demo stability.
-The V2 migration path is to replace the `build_merged()` call with an
-API fetch — no other changes required.
+
+**V2 migration path (5 workstreams, not a drop-in):** fully serving the app through the API requires:
+1. `GET /basket-recommendations?country=&month=&basket=` — filters on `matched_ingredients`, returns `cluster_label` and `matched_ingredients` in the payload;
+2. `GET /seasonal-products?country=&month=` — EUFIC in-season products (currently read from Silver);
+3. `GET /faostat-staples?country=` — FAOSTAT staples (currently read from Silver);
+4. `GET /countries` — list of available countries (EUFIC ∪ FAOSTAT);
+5. Add `cluster_label` and `matched_ingredients` to the API's internal join.
+
+The basket logic (EUFIC×month intersection, FAOSTAT staples, confidence banner) currently lives entirely in Streamlit.
 
 ---
 
@@ -649,10 +715,9 @@ A horizontal radio with three options appears below the slider:
 | **Score Durabilité** | `sort_values("durability_score", ascending=False)` |
 | **Meilleur compromis** | `0.6 × yummy_score + 0.4 × durability_score`, sorted descending |
 
-> **V1 note:** the "Score Durabilité" and "Meilleur compromis" sorts rely on a
-> `durability_score` pre-computed for France / June only. Changing the
-> country/month selection does not recompute this score — it only drives the
-> EUFIC basket. See `ml/README.md §7.4`.
+> **Note:** the "Score Durabilité" and "Meilleur compromis" sorts rely on `durability_score`
+> loaded from the `durability_country=<country>` partition for the selected month — the score
+> reflects the user's actual country and month selection (see `ml/README.md §7.4`).
 
 ### 3.8 Results overview
 
@@ -866,14 +931,16 @@ Changes to column names or types in Gold parquets must be reflected here.
 | `recipeid` | int64 | Join key |
 | `sentiment_percentile` | float64 | (loaded, available for future display) |
 
-**`gold_recipe_durability_scores.parquet`** (via `load_recommendations()`)
+**`gold_recipe_durability_scores/durability_country=<X>/data.parquet`** (via `load_durability_scores(country)`, filtered on `durability_month`)
 
 | Column | Type | Used for |
 |---|---|---|
+| `recipeid` | int64 | Join key |
+| `durability_month` | int64 | Filter by selected month |
 | `durability_score` | float64 | Durability badge + progress bar |
-| `coverage_score` | float64 | (loaded, available) |
-| `seasonality_score` | float64 | (loaded, available) |
-| `availability_score` | float64 | (loaded, available) |
+| `coverage_score` | float64 | Displayed in recipe details |
+| `seasonality_score` | float64 | Displayed in recipe details |
+| `availability_score` | float64 | Displayed in recipe details |
 
 **Silver parquets** (country/basket data, loaded cached at startup)
 
@@ -918,8 +985,14 @@ The Streamlit app does **not** call the FastAPI in V1. Both can run simultaneous
 ### Cold start behaviour
 
 On first button click, `build_merged()` loads and joins four parquets
-(~275K rows total). This takes 1–3 seconds on first call; subsequent
-calls within the same session are instant (`@st.cache_data`).
+(~275K rows total); `load_durability_scores(country)` loads the
+`durability_country=<country>/data.parquet` partition in parallel.
+This takes 1–3 seconds on first call; subsequent calls within the
+same session are instant (`@st.cache_data`).
+
+For analytical queries on the durability dataset outside Streamlit:
+`python tools/analyze_durability_duckdb.py` (DuckDB queries across all
+29 partitions, CSV exports to `reports/metrics/`).
 
 ---
 
@@ -936,14 +1009,13 @@ calls within the same session are instant (`@st.cache_data`).
 | `@st.cache_data` session-scoped | Multiple concurrent users each load their own copy of 275K rows |
 | `"bel"` → `"bell pepper"` reverse-prefix edge case | Token `"bel"` (e.g., from "Bel Paese cheese") passes the ingredient-matcher morphological guard and lands in `matched_ingredients` as `"bell pepper"`. Rare in practice; V2 fix is tighter guard or phrase-level NER (`ml/README.md §4.3`). |
 | 4 orphan sentiment IDs | Recipe IDs `{424301, 371545, 432898, 194165}` exist in `gold_sentiment_scores` but not in `gold_yummy_recommendations` (source `reviewcount == 0` inconsistency). They are never queried by the UI. |
-| `api/main.py` reads parquet per request | No server-side cache or graceful error handling for a missing file. Owned by the API team; flagged for their backlog. Demo is unaffected because the UI reads parquets directly. |
+| `api/main.py` reads durability partition per request | No server-side cache. Error handling: 404 for unknown country or no data, 500 for missing column. Demo is unaffected because the UI reads parquets directly. |
 | Scripts require project-root execution | Relative `Path("data/…")` paths used throughout — running from a subdirectory raises `FileNotFoundError`. |
-| Durability score pre-computed for France / June only | The country/month selection drives the EUFIC ingredient basket but does not recompute the displayed `durability_score` — it stays France / June regardless of selection (see `ml/README.md §7.4`). |
+| Local storage, no S3 runtime | API and Streamlit read `data/gold/` and `data/silver/` from the local filesystem. MinIO is reserved for the dbt cross-validation pipeline (`s3://yummy/`). Migrating to S3/MinIO as the runtime store is a V2 goal, activatable by configuration. |
 
 ### V2 roadmap
 
-1. **API-driven mode** — replace `build_merged()` with `GET /recommendations?basket=…`
-   to add server-side caching, request deduplication, and observability.
+1. **API-driven mode** — replace direct parquet reads with 5 new endpoints (see §1): `GET /basket-recommendations?basket=`, `GET /seasonal-products`, `GET /faostat-staples`, `GET /countries`, plus adding `cluster_label` and `matched_ingredients` to the API's internal join. Gain: server-side caching, request deduplication, observability.
 2. **Recipe name translation** — French display names via DeepL API batch
    (translate once, cache in parquet).
 3. **Richer basket** — show nutrient context (calories, protein) alongside
@@ -951,6 +1023,53 @@ calls within the same session are instant (`@st.cache_data`).
 4. **User preference persistence** — `st.session_state` + browser local storage
    via `streamlit-js-eval` to remember country/language across sessions.
 5. **Pagination** — show more than top 10 with `st.pagination` (Streamlit ≥ 1.37).
+
+---
+
+## 9. API — Verified Coverage (v1.2)
+
+> **Framing.** The API v1.2 exposes **100% of the data** consumed by `build_merged()` (5 sources). Streamlit reads Gold parquets directly **by demo-fluency choice** (`@st.cache_data`, no network required); wiring the UI to the API is the first V2 workstream (see §1 and §8).
+
+### Coverage matrix — 10/10 endpoints green
+
+| Endpoint | HTTP | Verified by |
+|---|---|---|
+| `GET /recommendations` | 200 | `cluster_label` + `matched_ingredients` present in payload |
+| `GET /basket-recommendations` (basket supplied) | 200 | matched recipes returned |
+| `GET /basket-recommendations` (empty basket) | 200 | global top-N fallback triggered |
+| `GET /basket-recommendations` (unknown country) | 404 | clean 404 |
+| `GET /seasonal-products` | 200 | `product_name` + `is_in_season` present |
+| `GET /seasonal-products` (unknown country) | 404 | clean 404 |
+| `GET /faostat-staples` | 200 | `production_value` present, ≤ top\_n rows |
+| `GET /faostat-staples` (unknown country) | 404 | clean 404 |
+| `GET /countries` | 200 | 248 entries, `eufic`/`faostat` typed booleans |
+| `GET /health` (v1.2 fields) | 200 | 4 new health fields present |
+
+Reproducible proof: `python tools/prove_api_coverage.py` (from project root).
+
+### Logic parity API ≡ Streamlit
+
+| Point | Result |
+|---|---|
+| **Basket France/June, basket `['apricot','artichoke','aubergine']`** | API = 3,711 recipes, Streamlit = 3,711 — **identical** |
+| **`_ingredient_hits`** | Bidirectional substring (`b in i or i in b`) copied verbatim from `streamlit_app.py` |
+| **`_FAO_AGGREGATE_PATTERNS`** | Identical tuple: `("primary", " total", ", total", "poultry", " meat", "equivalent", "oilcrop")` — 0 aggregate in top results |
+| **`GET /countries`** | 29 🟢 (EUFIC) + 219 🟡 (FAOSTAT-only) = 248 — matches the Streamlit confidence banner exactly |
+
+### Deliberate design choices (not gaps)
+
+**a) Basket fallback tiers**
+
+Streamlit implements 3 fallback tiers:
+1. Basket ∩ `matched_ingredients`
+2. If empty: retry with full seasonal product set (seasonal fallback)
+3. If still empty: global top-N
+
+The API collapses tiers 2 and 3 into a single global top-N fallback. No impact for baskets that return results (the normal case); **deliberate API simplification**, documented here for traceability.
+
+**b) Country key casing**
+
+The API returns lowercase internal keys (`"czechrepublic"`, `"france"`) — these are the values to pass to other endpoints. Streamlit uses title-cased display names (`"Czech Republic"`, `"France"`) for UI rendering. **Logically equivalent**, presentation difference only. A display↔internal mapping (via `EUFIC_DISPLAY_MAP`) would need to be added if the UI consumed the API directly (V2 workstream).
 
 ---
 ---
