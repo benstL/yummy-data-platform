@@ -178,6 +178,8 @@ def test_streamlit_business_options_use_faostat_as_produce_fallback() -> None:
 
 def test_ingredient_display_name_translates_only_for_french() -> None:
     assert ingredient_display_name("apricot", "fr") == "abricot"
+    assert ingredient_display_name("cherry", "fr") == "cerise"
+    assert ingredient_display_name("blueberry", "fr") == "myrtille"
     assert ingredient_display_name("new potato", "fr") == "pomme de terre nouvelle"
     assert ingredient_display_name("apricot", "en") == "apricot"
 
