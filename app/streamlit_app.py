@@ -52,6 +52,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "btn_generate":          "🍽️ Générer les Recommandations",
         "warn_no_basket":        "⚠️ Sélectionnez au moins un ingrédient pour obtenir des recommandations.",
         "spinner":               "Recherche de vos meilleures correspondances saisonnières…",
+        "spinner_initial":       "Chargement initial des données YUMMY…",
         "info_basket_fallback":  "Aucune recette trouvée pour votre panier (**{basket}**). Affichage du top {n} mondial.",
         "info_selection_fallback": "Aucune recette ne correspond à votre sélection exacte — affichage des meilleures recettes saisonnières.",
         "info_cluster_fallback": "Aucune recette ne correspond aux types sélectionnés. Filtre de type ignoré.",
