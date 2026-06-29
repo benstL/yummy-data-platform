@@ -403,8 +403,15 @@ def load_durability_scores(country: str) -> pd.DataFrame:
     files = sorted(country_dir.glob("*.parquet"))
 
     if not files:
-        raise FileNotFoundError(
-            f"No durability parquet found for country: {country}"
+        return pd.DataFrame(
+            columns=[
+                "recipeid",
+                "durability_month",
+                "seasonality_score",
+                "availability_score",
+                "durability_score",
+                "coverage_score",
+            ]
         )
 
     return pd.read_parquet(
@@ -489,13 +496,24 @@ def build_merged(country: str, month_number: int) -> pd.DataFrame:
         durability["durability_month"] == month_number
     ]
 
-    return (
+    merged = (
         yummy
         .merge(durability,          on="recipeid", how="left")
         .merge(load_clusters(),     on="recipeid", how="left")
         .merge(load_ingredient_map(), on="recipeid", how="left")
         .merge(load_sentiment(),    on="recipeid", how="left")
     )
+
+    for col in [
+        "seasonality_score",
+        "availability_score",
+        "durability_score",
+        "coverage_score",
+    ]:
+        if col in merged.columns:
+            merged[col] = merged[col].fillna(0)
+
+    return merged
 # ── Country utilities ─────────────────────────────────────────────────────────
 
 def _eufic_to_display(internal: str) -> str:
