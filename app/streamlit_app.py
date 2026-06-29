@@ -52,10 +52,11 @@ TEXTS: dict[str, dict[str, str]] = {
         "btn_generate":          "🍽️ Générer les Recommandations",
         "warn_no_basket":        "⚠️ Sélectionnez au moins un ingrédient pour obtenir des recommandations.",
         "spinner":               "Recherche de vos meilleures correspondances saisonnières…",
+        "spinner_initial":       "Chargement initial des données YUMMY…",
         "info_basket_fallback":  "Aucune recette trouvée pour votre panier (**{basket}**). Affichage du top {n} mondial.",
         "info_selection_fallback": "Aucune recette ne correspond à votre sélection exacte — affichage des meilleures recettes saisonnières.",
         "info_cluster_fallback": "Aucune recette ne correspond aux types sélectionnés. Filtre de type ignoré.",
-        "success_matches":       "**{total:,}** recettes correspondent — top {n} par Score YUMMY.",
+        "success_matches":       "**{n} recommandations affichées** parmi **{total:,}** recettes candidates.",
         "results_title":         "🏆 Top {n} Recommandations",
         "metric_yummy":          "Score YUMMY",
         "metric_durability":     "Durabilité",
@@ -104,7 +105,7 @@ TEXTS: dict[str, dict[str, str]] = {
         "info_basket_fallback":  "No recipes found matching your basket (**{basket}**). Showing global top {n} instead.",
         "info_selection_fallback": "No recipe matches your exact selection — showing closest seasonal picks.",
         "info_cluster_fallback": "No recipes match the selected types. Type filter ignored.",
-        "success_matches":       "**{total:,}** recipes match — showing top {n} by Yummy Score.",
+        "success_matches":       "**{n} recommendations shown** from **{total:,}** candidate recipes.",
         "results_title":         "🏆 Top {n} Recommendations",
         "metric_yummy":          "Yummy Score",
         "metric_durability":     "Durability",
@@ -140,6 +141,103 @@ MONTH_NAMES: dict[str, dict[int, str]] = {
 CONFIDENCE_DOT: dict[str, str] = {"eufic": "🟢", "faostat": "🟡", "none": "🔴"}
 
 _FAO_AGGREGATE_PATTERNS = ("primary", " total", ", total", "poultry", " meat", "equivalent", "oilcrop")
+
+FR_INGREDIENT_LABELS: dict[str, str] = {
+    "apple": "pomme",
+    "apples": "pommes",
+    "apricot": "abricot",
+    "apricots": "abricots",
+    "artichoke": "artichaut",
+    "asparagus": "asperge",
+    "aubergine": "aubergine",
+    "avocado": "avocat",
+    "avocados": "avocats",
+    "banana": "banane",
+    "berries": "baies",
+    "bean": "haricot",
+    "beef": "boeuf",
+    "bell pepper": "poivron",
+    "blackberry": "mure",
+    "blackberries": "mures",
+    "blueberry": "myrtille",
+    "blueberries": "myrtilles",
+    "broccoli": "brocoli",
+    "butter": "beurre",
+    "cabbage": "chou",
+    "cantaloupe": "melon cantaloup",
+    "cantaloupes": "melons cantaloup",
+    "carrot": "carotte",
+    "cauliflower": "chou-fleur",
+    "celery": "celeri",
+    "cheese": "fromage",
+    "cherry": "cerise",
+    "cherries": "cerises",
+    "chicken": "poulet",
+    "cranberry": "canneberge",
+    "cranberries": "canneberges",
+    "currant": "groseille",
+    "currants": "groseilles",
+    "cucumber": "concombre",
+    "date": "datte",
+    "dates": "dattes",
+    "egg": "oeuf",
+    "eggplant": "aubergine",
+    "fig": "figue",
+    "figs": "figues",
+    "flour": "farine",
+    "garlic": "ail",
+    "grape": "raisin",
+    "grapes": "raisins",
+    "green bean": "haricot vert",
+    "kiwi": "kiwi",
+    "kiwis": "kiwis",
+    "leek": "poireau",
+    "lemon": "citron",
+    "lettuce": "laitue",
+    "lime": "citron vert",
+    "mango": "mangue",
+    "mangoes": "mangues",
+    "melon": "melon",
+    "melons": "melons",
+    "milk": "lait",
+    "mushroom": "champignon",
+    "nectarine": "nectarine",
+    "nectarines": "nectarines",
+    "new potato": "pomme de terre nouvelle",
+    "olive oil": "huile d'olive",
+    "onion": "oignon",
+    "orange": "orange",
+    "papaya": "papaye",
+    "papayas": "papayes",
+    "pea": "petit pois",
+    "peach": "peche",
+    "pear": "poire",
+    "pepper": "poivre",
+    "pineapple": "ananas",
+    "plum": "prune",
+    "plums": "prunes",
+    "pomegranate": "grenade",
+    "pomegranates": "grenades",
+    "pork": "porc",
+    "potato": "pomme de terre",
+    "radish": "radis",
+    "raspberry": "framboise",
+    "raspberries": "framboises",
+    "red berry": "fruit rouge",
+    "redcurrant": "groseille",
+    "rice": "riz",
+    "salt": "sel",
+    "spinach": "epinard",
+    "strawberry": "fraise",
+    "tangerine": "mandarine",
+    "tangerines": "mandarines",
+    "tomato": "tomate",
+    "turnip": "navet",
+    "sugar beet": "betterave sucriere",
+    "watermelon": "pasteque",
+    "watermelons": "pasteques",
+    "zucchini": "courgette",
+}
 
 EUFIC_DISPLAY_MAP: dict[str, str] = {
     "czechrepublic": "Czech Republic",
@@ -398,12 +496,43 @@ def load_durability_scores(country: str) -> pd.DataFrame:
 
     country_slug = country.lower().replace(" ", "_")
     country_dir = DURABILITY / f"durability_country={country_slug}"
+    legacy_file = GOLD / "gold_recipe_durability_scores.parquet"
 
     files = sorted(country_dir.glob("*.parquet"))
 
     if not files:
-        raise FileNotFoundError(
-            f"No durability parquet found for country: {country}"
+        if legacy_file.exists():
+            legacy = pd.read_parquet(
+                legacy_file,
+                columns=[
+                    "recipeid",
+                    "durability_month",
+                    "seasonality_score",
+                    "availability_score",
+                    "durability_score",
+                    "coverage_score",
+                    "durability_country",
+                ],
+            )
+            legacy_country = country.lower().replace(" ", "")
+            legacy = legacy[
+                legacy["durability_country"]
+                .astype(str)
+                .str.lower()
+                .str.replace(" ", "", regex=False)
+                == legacy_country
+            ].copy()
+            return legacy.drop(columns=["durability_country"], errors="ignore")
+
+        return pd.DataFrame(
+            columns=[
+                "recipeid",
+                "durability_month",
+                "seasonality_score",
+                "availability_score",
+                "durability_score",
+                "coverage_score",
+            ]
         )
 
     return pd.read_parquet(
@@ -488,13 +617,24 @@ def build_merged(country: str, month_number: int) -> pd.DataFrame:
         durability["durability_month"] == month_number
     ]
 
-    return (
+    merged = (
         yummy
         .merge(durability,          on="recipeid", how="left")
         .merge(load_clusters(),     on="recipeid", how="left")
         .merge(load_ingredient_map(), on="recipeid", how="left")
         .merge(load_sentiment(),    on="recipeid", how="left")
     )
+
+    for col in [
+        "seasonality_score",
+        "availability_score",
+        "durability_score",
+        "coverage_score",
+    ]:
+        if col in merged.columns:
+            merged[col] = merged[col].fillna(0)
+
+    return merged
 # ── Country utilities ─────────────────────────────────────────────────────────
 
 def _eufic_to_display(internal: str) -> str:
@@ -623,6 +763,30 @@ def _unique_options_by_normalized_name(options: list[str]) -> list[str]:
     return output
 
 
+def ingredient_display_name(name: str, lang: str) -> str:
+    """Return the UI label for an ingredient while keeping its raw value internal."""
+    if lang != "fr":
+        return name
+
+    normalized = _normalize_option_name(name)
+    return FR_INGREDIENT_LABELS.get(normalized, name)
+
+
+def build_localized_option_map(options: list[str], lang: str) -> tuple[list[str], dict[str, str]]:
+    """Return translated option labels and a label-to-raw-value lookup."""
+    labels: list[str] = []
+    label_to_raw: dict[str, str] = {}
+
+    for raw in options:
+        label = ingredient_display_name(raw, lang)
+        if label in label_to_raw and label_to_raw[label] != raw:
+            label = f"{label} ({raw})"
+        labels.append(label)
+        label_to_raw[label] = raw
+
+    return labels, label_to_raw
+
+
 SEASONAL_PRODUCE_CATEGORIES = frozenset({"fruit", "vegetable"})
 
 
@@ -747,6 +911,27 @@ def _recipe_matches(ingredients_raw: Any, basket_set: set[str]) -> bool:
 
 # ── Recipe filtering ───────────────────────────────────────────────────────────
 
+def add_basket_relevance_scores(df: pd.DataFrame, basket: list[str]) -> pd.DataFrame:
+    """Add basket relevance metrics used to rank recommendations."""
+    result = df.copy()
+    basket_set = set(basket)
+    basket_size = max(len(basket_set), 1)
+
+    result["basket_match_count"] = result["matched_ingredients"].apply(
+        lambda value: len(_ingredient_hits(_to_ingredient_set(value), basket_set))
+    )
+    result["basket_match_score"] = (
+        result["basket_match_count"] / basket_size * 100
+    ).clip(upper=100).round(2)
+    result["recommendation_score"] = (
+        0.50 * result["basket_match_score"]
+        + 0.30 * result["durability_score"].fillna(0)
+        + 0.20 * result["yummy_score"].fillna(0)
+    ).round(2)
+
+    return result
+
+
 def filter_by_basket(
     merged: pd.DataFrame,
     basket: list[str],
@@ -767,7 +952,10 @@ def filter_by_basket(
     mask = merged["matched_ingredients"].apply(
         lambda v: _recipe_matches(v, basket_set)
     )
-    matched = merged[mask].sort_values("yummy_score", ascending=False)
+    matched = add_basket_relevance_scores(merged[mask], basket).sort_values(
+        ["basket_match_count", "recommendation_score", "durability_score", "yummy_score"],
+        ascending=[False, False, False, False],
+    )
 
     if not matched.empty:
         return matched, False, False
@@ -777,11 +965,20 @@ def filter_by_basket(
         fb_mask = merged["matched_ingredients"].apply(
             lambda v: _recipe_matches(v, fb_set)
         )
-        fb_matched = merged[fb_mask].sort_values("yummy_score", ascending=False)
+        fb_matched = add_basket_relevance_scores(
+            merged[fb_mask], fallback_basket
+        ).sort_values(
+            ["basket_match_count", "recommendation_score", "durability_score", "yummy_score"],
+            ascending=[False, False, False, False],
+        )
         if not fb_matched.empty:
             return fb_matched, False, True
 
-    return merged.sort_values("yummy_score", ascending=False), True, False
+    global_top = add_basket_relevance_scores(merged, basket).sort_values(
+        ["recommendation_score", "durability_score", "yummy_score"],
+        ascending=[False, False, False],
+    )
+    return global_top, True, False
 
 
 def apply_cluster_filter(
@@ -1100,30 +1297,42 @@ def main() -> None:
             f"{source_caption} — {len(seasonal_options)} seasonal, "
             f"{len(complementary_options)} complementary"
         )
+        seasonal_labels, seasonal_label_to_raw = build_localized_option_map(seasonal_options, lang)
+        complementary_labels, complementary_label_to_raw = build_localized_option_map(complementary_options, lang)
+
         if seasonal_options:
             st.caption(texts["basket_note_eufic_available"])
             col_seasonal, col_complementary = st.columns(2)
             with col_seasonal:
-                selected_seasonal = st.multiselect(
+                selected_seasonal_labels = st.multiselect(
                     texts["seasonal_ingredients_label"],
-                    options=seasonal_options,
+                    options=seasonal_labels,
                     default=[],
                 )
             with col_complementary:
-                selected_complementary = st.multiselect(
+                selected_complementary_labels = st.multiselect(
                     texts["complementary_ingredients_label"],
-                    options=complementary_options,
+                    options=complementary_labels,
                     default=[],
                 )
+            selected_seasonal = [
+                seasonal_label_to_raw[label] for label in selected_seasonal_labels
+            ]
+            selected_complementary = [
+                complementary_label_to_raw[label] for label in selected_complementary_labels
+            ]
         else:
             st.warning(texts["basket_note_eufic_unavailable"])
             selected_seasonal = []
             st.caption(texts["basket_note_complementary_primary"])
-            selected_complementary = st.multiselect(
+            selected_complementary_labels = st.multiselect(
                 texts["complementary_ingredients_label"],
-                options=complementary_options,
+                options=complementary_labels,
                 default=[],
             )
+            selected_complementary = [
+                complementary_label_to_raw[label] for label in selected_complementary_labels
+            ]
         basket = list(dict.fromkeys(selected_seasonal + selected_complementary))
     else:
         st.warning(
@@ -1211,21 +1420,26 @@ def main() -> None:
             "Meilleur compromis"
         ],
         horizontal=True,
+        index=2,
     )   
 
     if sort_mode == "Score Yummy":
-        cluster_results = cluster_results.sort_values("yummy_score", ascending=False)
+        cluster_results = cluster_results.sort_values(
+            ["basket_match_count", "yummy_score"],
+            ascending=[False, False],
+        )
 
     elif sort_mode == "Score Durabilité":
-        cluster_results = cluster_results.sort_values("durability_score", ascending=False)
+        cluster_results = cluster_results.sort_values(
+            ["basket_match_count", "durability_score", "yummy_score"],
+            ascending=[False, False, False],
+        )
 
     else:
-        cluster_results = cluster_results.assign(
-            combined_score=(
-                0.6 * cluster_results["yummy_score"]
-                + 0.4 * cluster_results["durability_score"]
-            )
-        ).sort_values("combined_score", ascending=False)
+        cluster_results = cluster_results.sort_values(
+            ["recommendation_score", "basket_match_count", "durability_score", "yummy_score"],
+            ascending=[False, False, False, False],
+        )
 
     results = cluster_results.head(TOP_N)
 
