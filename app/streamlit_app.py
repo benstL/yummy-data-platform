@@ -8,11 +8,19 @@ from __future__ import annotations
 import calendar
 import html as _html_mod
 import re
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 import pandas as pd
 import streamlit as st
+import requests
+
+from api.main import build_ingredient_buckets, load_ingredient_map_data
+from ml.matching.ingredient_matcher import load_ingredient_taxonomy, map_ingredient_to_category
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 GOLD         = Path("data/gold")
@@ -33,6 +41,13 @@ TEXTS: dict[str, dict[str, str]] = {
         "conf_banner":           "{dot} **{msg}** — confiance de la source pour **{country}**",
         "basket_title":          "🛒 Panier d'Ingrédients",
         "basket_label":          "Ingrédients sélectionnés :",
+        "seasonal_ingredients_label": "🥬 Ingrédients de saison",
+        "complementary_ingredients_label": "🌍 Autres ingrédients disponibles",
+        "api_base_label":        "URL de l'API",
+        "api_base_help":         "Adresse de l'API YUMMY utilisée pour charger les ingrédients.",
+        "basket_note_eufic_available": "Les ingrédients EUFIC sont priorisés. Les ingrédients complémentaires enrichissent la recette.",
+        "basket_note_eufic_unavailable": "Aucune donnée EUFIC disponible pour ce pays/mois. Les ingrédients complémentaires sont la source principale.",
+        "basket_note_complementary_primary": "Ingrédients complémentaires : source principale en l'absence de données EUFIC.",
         "cluster_filter_label":  "🏷️ Filtrer par type de recette",
         "btn_generate":          "🍽️ Générer les Recommandations",
         "warn_no_basket":        "⚠️ Sélectionnez au moins un ingrédient pour obtenir des recommandations.",
@@ -74,10 +89,18 @@ TEXTS: dict[str, dict[str, str]] = {
         "conf_banner":           "{dot} **{msg}** — data source confidence for **{country}**",
         "basket_title":          "🛒 Ingredient Basket",
         "basket_label":          "Selected ingredients:",
+        "seasonal_ingredients_label": "🥬 Seasonal ingredients",
+        "complementary_ingredients_label": "🌍 Available ingredients",
+        "api_base_label":        "API base URL",
+        "api_base_help":         "YUMMY API address used to load ingredient buckets.",
+        "basket_note_eufic_available": "EUFIC ingredients are prioritized. Complementary ingredients enrich the recipe.",
+        "basket_note_eufic_unavailable": "EUFIC seasonality data unavailable for this country/month. Recommendations use an approximation based on FAOSTAT/Food.com.",
+        "basket_note_complementary_primary": "🍽️ Complete your recipe with FAOSTAT/Food.com ingredients.",
         "cluster_filter_label":  "🏷️ Filter by recipe type",
         "btn_generate":          "🍽️ Generate Recommendations",
         "warn_no_basket":        "⚠️ Select at least one ingredient to get personalised recommendations.",
         "spinner":               "Finding your best seasonal matches…",
+        "spinner_initial":       "Loading YUMMY data for the first time…",
         "info_basket_fallback":  "No recipes found matching your basket (**{basket}**). Showing global top {n} instead.",
         "info_selection_fallback": "No recipe matches your exact selection — showing closest seasonal picks.",
         "info_cluster_fallback": "No recipes match the selected types. Type filter ignored.",
@@ -429,10 +452,16 @@ def load_eufic() -> pd.DataFrame:
     files = sorted(SILVER_EUFIC.glob("silver_seasonality_*.parquet"))
     if not files:
         raise FileNotFoundError("No EUFIC silver parquet found.")
-    return pd.read_parquet(
-        files[-1],
-        columns=["product_name", "month_number", "country", "is_in_season"],
-    )
+    if not files:
+        return pd.DataFrame(columns=["product_name", "month_number", "country", "is_in_season"])
+
+    try:
+        return pd.read_parquet(
+            files[-1],
+            columns=["product_name", "month_number", "country", "is_in_season"],
+        )
+    except Exception:
+        return pd.DataFrame(columns=["product_name", "month_number", "country", "is_in_season"])
 
 
 @st.cache_data
@@ -565,6 +594,133 @@ def _to_ingredient_set(value: Any) -> set[str]:
         return set(value)
     except TypeError:
         return set()
+
+
+def _normalize_option_name(value: str) -> str:
+    """Normalise ingredient display names for comparison."""
+    if not isinstance(value, str):
+        return ""
+    cleaned = re.sub(r"\s+", " ", value.strip().lower())
+    cleaned = cleaned.replace("(", " ").replace(")", " ").strip()
+    if cleaned.endswith("ies") and len(cleaned) > 4:
+        cleaned = cleaned[:-3] + "y"
+    elif cleaned.endswith("oes") and len(cleaned) > 4:
+        cleaned = cleaned[:-2]
+    elif cleaned.endswith("s") and len(cleaned) > 4 and not cleaned.endswith(("ss", "us", "is", "os", "as")):
+        cleaned = cleaned[:-1]
+    return cleaned
+
+
+def _unique_options_by_normalized_name(options: list[str]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for item in options:
+        normalized = _normalize_option_name(item)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        output.append(item)
+    return output
+
+
+SEASONAL_PRODUCE_CATEGORIES = frozenset({"fruit", "vegetable"})
+
+
+def _ingredient_name(item: Any) -> str:
+    """Return the display name from either API v2 objects or legacy strings."""
+    if isinstance(item, dict):
+        return str(item.get("name") or "").strip()
+    return str(item or "").strip()
+
+
+def _ingredient_category(item: Any, taxonomy: Mapping[str, str]) -> str:
+    """Return the business category for API v2 objects or legacy strings."""
+    if isinstance(item, dict) and item.get("category"):
+        return str(item["category"]).strip().lower()
+    name = _ingredient_name(item)
+    return map_ingredient_to_category(name, taxonomy) if name else "other"
+
+
+def _is_seasonal_produce(item: Any, taxonomy: Mapping[str, str]) -> bool:
+    return _ingredient_category(item, taxonomy) in SEASONAL_PRODUCE_CATEGORIES
+
+
+def build_business_ingredient_options(
+    eufic_items: list[str],
+    faostat_items: list[str],
+    ingredient_buckets: dict[str, Any],
+    taxonomy: Mapping[str, str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Build mutually exclusive seasonal and complementary ingredient lists.
+
+    Business rules:
+    - seasonal options are only EUFIC fruit/vegetable products for the selected
+      country and month;
+    - API/local bucket produce is not promoted to seasonal, because EUFIC is the
+      reference for seasonality;
+    - complementary options never repeat a seasonal EUFIC product;
+    - FAOSTAT is a fallback source and may add non-duplicated products.
+    """
+    taxonomy = taxonomy or load_ingredient_taxonomy()
+
+    seasonal_options = _unique_options_by_normalized_name([
+        item for item in eufic_items if _is_seasonal_produce(item, taxonomy)
+    ])
+    seasonal_norm = {_normalize_option_name(item) for item in seasonal_options}
+
+    complementary_candidates: list[str] = []
+
+    # API/local complementary buckets can contain legacy mixed ingredients.
+    # Keep only non-produce here; FAOSTAT below is the explicit fallback path for
+    # produce missing from the EUFIC seasonal list.
+    for item in ingredient_buckets.get("complementary_ingredients", []):
+        name = _ingredient_name(item)
+        if not name or _normalize_option_name(name) in seasonal_norm:
+            continue
+        if not _is_seasonal_produce(item, taxonomy):
+            complementary_candidates.append(name)
+
+    # FAOSTAT complements the basket, but never duplicates EUFIC seasonal items.
+    for item in faostat_items:
+        name = _ingredient_name(item)
+        if name and _normalize_option_name(name) not in seasonal_norm:
+            complementary_candidates.append(name)
+
+    complementary_options = _unique_options_by_normalized_name(complementary_candidates)
+    return seasonal_options, complementary_options
+
+
+@st.cache_data
+def fetch_ingredient_buckets_v2(api_base: str = "http://127.0.0.1:8000") -> dict:
+    """Try to fetch structured ingredient buckets from the API v2 endpoint.
+
+    Returns the full payload from `/ingredient-buckets/v2` if successful.
+    On failure, returns an empty dict so callers can fallback to local Gold.
+    """
+    try:
+        url = api_base.rstrip("/") + "/ingredient-buckets/v2"
+        resp = requests.get(url, timeout=1.0)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+@st.cache_data
+def load_ingredient_buckets_from_api(api_base: str) -> tuple[dict[str, Any], bool]:
+    """Load ingredient buckets from API v2 and indicate whether API was used."""
+    payload = fetch_ingredient_buckets_v2(api_base)
+    if payload:
+        return payload, True
+    buckets = build_ingredient_buckets(load_ingredient_map_data())
+    return {
+        "seasonal_ingredients": buckets["seasonal_ingredients"],
+        "complementary_ingredients": buckets["complementary_ingredients"],
+        "seasonality_available": False,
+        "seasonality_source": None,
+        "complementary_source": "FAOSTAT/Food.com",
+    }, False
 
 
 def _ingredient_hits(ingredients: set[str], basket_set: set[str]) -> set[str]:
@@ -836,6 +992,13 @@ def main() -> None:
             format_func=lambda x: "🇫🇷 Français" if x == "fr" else "🇬🇧 English",
             label_visibility="visible",
         )
+        st.markdown("### API configuration")
+        api_base = st.text_input(
+            TEXTS[lang]["api_base_label"],
+            value="http://127.0.0.1:8000",
+            help=TEXTS[lang]["api_base_help"],
+            label_visibility="visible",
+        )
 
     texts       = TEXTS[lang]
     month_names = MONTH_NAMES[lang]
@@ -879,29 +1042,34 @@ def main() -> None:
 
     eufic_items   = get_seasonal_products(country, month_num)
     faostat_items = get_faostat_staples(country)
-    eufic_set     = set(eufic_items)
-    faostat_only  = [p for p in faostat_items if p not in eufic_set]
-    all_options   = eufic_items + faostat_only
-    seasonal_all  = all_options
 
-    if eufic_items and faostat_only:
+    # Try to fetch structured buckets from a running API (v2). If the API is
+    # unreachable, fall back to reading the local Gold parquet as before.
+    ingredient_buckets, using_api = load_ingredient_buckets_from_api(api_base)
+    seasonal_options, complementary_options = build_business_ingredient_options(
+        eufic_items=eufic_items,
+        faostat_items=faostat_items,
+        ingredient_buckets=ingredient_buckets,
+    )
+
+    if seasonal_options and complementary_options:
         caption = (
-            f"🟢 **{len(eufic_items)}** "
+            f"🟢 **{len(seasonal_options)}** "
             + ("en saison (EUFIC)" if lang == "fr" else "in-season (EUFIC)")
-            + f" + 🟡 **{len(faostat_only)}** "
-            + ("aliments de base (FAOSTAT)" if lang == "fr" else "staples (FAOSTAT)")
+            + f" + 🟡 **{len(complementary_options)}** "
+            + ("compléments" if lang == "fr" else "complements")
             + f" — **{country}**, **{month_names[month_num]}**"
         )
-    elif eufic_items:
+    elif seasonal_options:
         caption = (
-            f"🟢 {len(eufic_items)} "
+            f"🟢 {len(seasonal_options)} "
             + ("produits de saison (EUFIC)" if lang == "fr" else "in-season products (EUFIC)")
             + f" — **{country}**, **{month_names[month_num]}**"
         )
-    elif faostat_only:
+    elif complementary_options:
         caption = (
-            f"🟡 {len(faostat_only)} "
-            + ("aliments de base (FAOSTAT)" if lang == "fr" else "agricultural staples (FAOSTAT)")
+            f"🟡 {len(complementary_options)} "
+            + ("compléments disponibles" if lang == "fr" else "available complements")
             + " — "
             + ("aucune donnée EUFIC disponible" if lang == "fr" else "no EUFIC seasonal data")
         )
@@ -910,18 +1078,61 @@ def main() -> None:
 
     st.caption(caption)
 
-    if all_options:
-        basket: list[str] = st.multiselect(
-            texts["basket_label"],
-            options=all_options,
-            default=all_options[:3],
+    if seasonal_options or complementary_options:
+        seasonality_available = bool(seasonal_options)
+        if using_api:
+            source_caption = (
+                "Seasonal from EUFIC + complementary from API v2"
+                if seasonality_available and lang == "en"
+                else "Complementary from API v2"
+                if lang == "en"
+                else "Complémentaires depuis API v2"
+            )
+        else:
+            source_caption = (
+                "Seasonal from EUFIC + complementary from local Gold fallback"
+                if seasonality_available and lang == "en"
+                else "Complementary from local Gold fallback"
+                if lang == "en"
+                else "Complémentaires depuis le fallback local Gold"
+            )
+        st.caption(
+            f"{source_caption} — {len(seasonal_options)} seasonal, "
+            f"{len(complementary_options)} complementary"
         )
+        if seasonal_options:
+            st.caption(texts["basket_note_eufic_available"])
+            col_seasonal, col_complementary = st.columns(2)
+            with col_seasonal:
+                selected_seasonal = st.multiselect(
+                    texts["seasonal_ingredients_label"],
+                    options=seasonal_options,
+                    default=[],
+                )
+            with col_complementary:
+                selected_complementary = st.multiselect(
+                    texts["complementary_ingredients_label"],
+                    options=complementary_options,
+                    default=[],
+                )
+        else:
+            st.warning(texts["basket_note_eufic_unavailable"])
+            selected_seasonal = []
+            st.caption(texts["basket_note_complementary_primary"])
+            selected_complementary = st.multiselect(
+                texts["complementary_ingredients_label"],
+                options=complementary_options,
+                default=[],
+            )
+        basket = list(dict.fromkeys(selected_seasonal + selected_complementary))
     else:
         st.warning(
             "Aucune donnée disponible pour ce pays." if lang == "fr"
             else f"No ingredient data available for {country}."
         )
         basket = []
+
+    seasonal_all = seasonal_options
 
     # ── Cluster filter ──────────────────────────────────────────────────────────
     _section_head(texts["cluster_filter_label"])
@@ -940,6 +1151,11 @@ def main() -> None:
 
     if st.button(texts["btn_generate"], type="primary", use_container_width=True):
         st.session_state.show_results = True
+        merged_key = (country, month_num)
+        if st.session_state.get("merged_key") != merged_key:
+            with st.spinner(texts["spinner_initial"]):
+                st.session_state.merged = build_merged(country, month_num)
+                st.session_state.merged_key = merged_key
 
     if not st.session_state.show_results:
         return
@@ -950,7 +1166,11 @@ def main() -> None:
 
     # ── 5. Filter ───────────────────────────────────────────────────────────────
     with st.spinner(texts["spinner"]):
-        merged = build_merged(country,month_num)
+        merged_key = (country, month_num)
+        if st.session_state.get("merged_key") != merged_key:
+            st.session_state.merged = build_merged(country, month_num)
+            st.session_state.merged_key = merged_key
+        merged = st.session_state.merged
         basket_results, is_global_fallback, is_selection_fallback = filter_by_basket(
             merged, basket, fallback_basket=seasonal_all
         )

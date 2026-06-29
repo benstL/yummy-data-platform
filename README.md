@@ -63,6 +63,8 @@ Principaux endpoints :
 | `GET /recipe/{recipeid}` | Détail d'une recette |
 | `GET /quick-recipes` | Recettes rapides |
 | `GET /category/{category}` | Recettes d'une catégorie |
+| `GET /ingredient-buckets` | Listes simples d'ingrédients saisonniers et complémentaires |
+| `GET /ingredient-buckets/v2` | Listes structurées d'ingrédients avec catégorie et flag saisonnier |
 
 Le répertoire partitionné utilisé par l'API FastAPI est désormais :
 
@@ -106,6 +108,8 @@ http://localhost:8000/docs
   - `GET /recipes-by-score` : classement selon le score choisi
   - `GET /recipe/{recipeid}` : détail d'une recette
   - `GET /quick-recipes` : recettes rapides selon un temps maximum
+  - `GET /ingredient-buckets` : listes simples d'ingrédients saisonniers et complémentaires
+  - `GET /ingredient-buckets/v2` : listes structurées d'ingrédients avec catégorie et flag saisonnier
   - `GET /category/{category}` : recommandations par catégorie
   - `GET /basket-recommendations?country=&month=&basket=` : filtrage par panier d'ingrédients
   - `GET /seasonal-products?country=&month=` : produits EUFIC en saison
