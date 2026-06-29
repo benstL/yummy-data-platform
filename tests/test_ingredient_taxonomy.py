@@ -4,7 +4,11 @@ from pathlib import Path
 import pandas as pd
 
 from api.main import build_ingredient_buckets
-from app.streamlit_app import build_business_ingredient_options, ingredient_display_name
+from app.streamlit_app import (
+    build_business_ingredient_options,
+    build_localized_option_map,
+    ingredient_display_name,
+)
 from ml.matching.ingredient_matcher import (
     build_recipe_map,
     load_ingredient_taxonomy,
@@ -179,3 +183,15 @@ def test_ingredient_display_name_translates_only_for_french() -> None:
 
 def test_ingredient_display_name_keeps_unknown_raw_value() -> None:
     assert ingredient_display_name("unknown ingredient", "fr") == "unknown ingredient"
+
+
+def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:
+    labels, label_to_raw = build_localized_option_map(
+        ["mushroom", "tomato", "sugar beet"],
+        "fr",
+    )
+
+    assert labels == ["champignon", "tomate", "betterave sucriere"]
+    assert label_to_raw["champignon"] == "mushroom"
+    assert label_to_raw["tomate"] == "tomato"
+    assert label_to_raw["betterave sucriere"] == "sugar beet"

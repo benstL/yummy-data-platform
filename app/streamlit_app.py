@@ -170,6 +170,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "lettuce": "laitue",
     "milk": "lait",
     "mushroom": "champignon",
+    "nectarine": "nectarine",
     "new potato": "pomme de terre nouvelle",
     "olive oil": "huile d'olive",
     "onion": "oignon",
@@ -178,6 +179,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "pork": "porc",
     "potato": "pomme de terre",
     "radish": "radis",
+    "red berry": "fruit rouge",
     "redcurrant": "groseille",
     "rice": "riz",
     "salt": "sel",
@@ -185,6 +187,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "strawberry": "fraise",
     "tomato": "tomate",
     "turnip": "navet",
+    "sugar beet": "betterave sucriere",
     "zucchini": "courgette",
 }
 
@@ -697,6 +700,21 @@ def ingredient_display_name(name: str, lang: str) -> str:
     return FR_INGREDIENT_LABELS.get(normalized, name)
 
 
+def build_localized_option_map(options: list[str], lang: str) -> tuple[list[str], dict[str, str]]:
+    """Return translated option labels and a label-to-raw-value lookup."""
+    labels: list[str] = []
+    label_to_raw: dict[str, str] = {}
+
+    for raw in options:
+        label = ingredient_display_name(raw, lang)
+        if label in label_to_raw and label_to_raw[label] != raw:
+            label = f"{label} ({raw})"
+        labels.append(label)
+        label_to_raw[label] = raw
+
+    return labels, label_to_raw
+
+
 SEASONAL_PRODUCE_CATEGORIES = frozenset({"fruit", "vegetable"})
 
 
@@ -1174,33 +1192,42 @@ def main() -> None:
             f"{source_caption} — {len(seasonal_options)} seasonal, "
             f"{len(complementary_options)} complementary"
         )
+        seasonal_labels, seasonal_label_to_raw = build_localized_option_map(seasonal_options, lang)
+        complementary_labels, complementary_label_to_raw = build_localized_option_map(complementary_options, lang)
+
         if seasonal_options:
             st.caption(texts["basket_note_eufic_available"])
             col_seasonal, col_complementary = st.columns(2)
             with col_seasonal:
-                selected_seasonal = st.multiselect(
+                selected_seasonal_labels = st.multiselect(
                     texts["seasonal_ingredients_label"],
-                    options=seasonal_options,
+                    options=seasonal_labels,
                     default=[],
-                    format_func=lambda item: ingredient_display_name(item, lang),
                 )
             with col_complementary:
-                selected_complementary = st.multiselect(
+                selected_complementary_labels = st.multiselect(
                     texts["complementary_ingredients_label"],
-                    options=complementary_options,
+                    options=complementary_labels,
                     default=[],
-                    format_func=lambda item: ingredient_display_name(item, lang),
                 )
+            selected_seasonal = [
+                seasonal_label_to_raw[label] for label in selected_seasonal_labels
+            ]
+            selected_complementary = [
+                complementary_label_to_raw[label] for label in selected_complementary_labels
+            ]
         else:
             st.warning(texts["basket_note_eufic_unavailable"])
             selected_seasonal = []
             st.caption(texts["basket_note_complementary_primary"])
-            selected_complementary = st.multiselect(
+            selected_complementary_labels = st.multiselect(
                 texts["complementary_ingredients_label"],
-                options=complementary_options,
+                options=complementary_labels,
                 default=[],
-                format_func=lambda item: ingredient_display_name(item, lang),
             )
+            selected_complementary = [
+                complementary_label_to_raw[label] for label in selected_complementary_labels
+            ]
         basket = list(dict.fromkeys(selected_seasonal + selected_complementary))
     else:
         st.warning(
