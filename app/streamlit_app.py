@@ -863,6 +863,27 @@ def _recipe_matches(ingredients_raw: Any, basket_set: set[str]) -> bool:
 
 # ── Recipe filtering ───────────────────────────────────────────────────────────
 
+def add_basket_relevance_scores(df: pd.DataFrame, basket: list[str]) -> pd.DataFrame:
+    """Add basket relevance metrics used to rank recommendations."""
+    result = df.copy()
+    basket_set = set(basket)
+    basket_size = max(len(basket_set), 1)
+
+    result["basket_match_count"] = result["matched_ingredients"].apply(
+        lambda value: len(_ingredient_hits(_to_ingredient_set(value), basket_set))
+    )
+    result["basket_match_score"] = (
+        result["basket_match_count"] / basket_size * 100
+    ).clip(upper=100).round(2)
+    result["recommendation_score"] = (
+        0.50 * result["basket_match_score"]
+        + 0.30 * result["durability_score"].fillna(0)
+        + 0.20 * result["yummy_score"].fillna(0)
+    ).round(2)
+
+    return result
+
+
 def filter_by_basket(
     merged: pd.DataFrame,
     basket: list[str],
@@ -883,7 +904,10 @@ def filter_by_basket(
     mask = merged["matched_ingredients"].apply(
         lambda v: _recipe_matches(v, basket_set)
     )
-    matched = merged[mask].sort_values("yummy_score", ascending=False)
+    matched = add_basket_relevance_scores(merged[mask], basket).sort_values(
+        ["basket_match_count", "recommendation_score", "durability_score", "yummy_score"],
+        ascending=[False, False, False, False],
+    )
 
     if not matched.empty:
         return matched, False, False
@@ -893,11 +917,20 @@ def filter_by_basket(
         fb_mask = merged["matched_ingredients"].apply(
             lambda v: _recipe_matches(v, fb_set)
         )
-        fb_matched = merged[fb_mask].sort_values("yummy_score", ascending=False)
+        fb_matched = add_basket_relevance_scores(
+            merged[fb_mask], fallback_basket
+        ).sort_values(
+            ["basket_match_count", "recommendation_score", "durability_score", "yummy_score"],
+            ascending=[False, False, False, False],
+        )
         if not fb_matched.empty:
             return fb_matched, False, True
 
-    return merged.sort_values("yummy_score", ascending=False), True, False
+    global_top = add_basket_relevance_scores(merged, basket).sort_values(
+        ["recommendation_score", "durability_score", "yummy_score"],
+        ascending=[False, False, False],
+    )
+    return global_top, True, False
 
 
 def apply_cluster_filter(
@@ -1339,21 +1372,26 @@ def main() -> None:
             "Meilleur compromis"
         ],
         horizontal=True,
+        index=2,
     )   
 
     if sort_mode == "Score Yummy":
-        cluster_results = cluster_results.sort_values("yummy_score", ascending=False)
+        cluster_results = cluster_results.sort_values(
+            ["basket_match_count", "yummy_score"],
+            ascending=[False, False],
+        )
 
     elif sort_mode == "Score Durabilité":
-        cluster_results = cluster_results.sort_values("durability_score", ascending=False)
+        cluster_results = cluster_results.sort_values(
+            ["basket_match_count", "durability_score", "yummy_score"],
+            ascending=[False, False, False],
+        )
 
     else:
-        cluster_results = cluster_results.assign(
-            combined_score=(
-                0.6 * cluster_results["yummy_score"]
-                + 0.4 * cluster_results["durability_score"]
-            )
-        ).sort_values("combined_score", ascending=False)
+        cluster_results = cluster_results.sort_values(
+            ["recommendation_score", "basket_match_count", "durability_score", "yummy_score"],
+            ascending=[False, False, False, False],
+        )
 
     results = cluster_results.head(TOP_N)
 

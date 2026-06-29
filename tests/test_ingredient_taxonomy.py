@@ -5,6 +5,7 @@ import pandas as pd
 
 from api.main import build_ingredient_buckets
 from app.streamlit_app import (
+    add_basket_relevance_scores,
     build_business_ingredient_options,
     build_localized_option_map,
     ingredient_display_name,
@@ -195,3 +196,20 @@ def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:
     assert label_to_raw["champignon"] == "mushroom"
     assert label_to_raw["tomate"] == "tomato"
     assert label_to_raw["betterave sucriere"] == "sugar beet"
+
+
+def test_basket_relevance_rewards_multiple_matches() -> None:
+    df = pd.DataFrame(
+        {
+            "recipeid": [1, 2],
+            "matched_ingredients": [["banana"], ["banana", "strawberry"]],
+            "durability_score": [80.0, 40.0],
+            "yummy_score": [90.0, 70.0],
+        }
+    )
+
+    scored = add_basket_relevance_scores(df, ["banana", "strawberry"])
+
+    assert scored.loc[0, "basket_match_count"] == 1
+    assert scored.loc[1, "basket_match_count"] == 2
+    assert scored.loc[1, "recommendation_score"] > scored.loc[0, "recommendation_score"]
