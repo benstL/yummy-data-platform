@@ -142,6 +142,52 @@ CONFIDENCE_DOT: dict[str, str] = {"eufic": "🟢", "faostat": "🟡", "none": "�
 
 _FAO_AGGREGATE_PATTERNS = ("primary", " total", ", total", "poultry", " meat", "equivalent", "oilcrop")
 
+FR_INGREDIENT_LABELS: dict[str, str] = {
+    "apple": "pomme",
+    "apricot": "abricot",
+    "artichoke": "artichaut",
+    "asparagus": "asperge",
+    "aubergine": "aubergine",
+    "banana": "banane",
+    "bean": "haricot",
+    "beef": "boeuf",
+    "bell pepper": "poivron",
+    "broccoli": "brocoli",
+    "butter": "beurre",
+    "cabbage": "chou",
+    "carrot": "carotte",
+    "cauliflower": "chou-fleur",
+    "celery": "celeri",
+    "cheese": "fromage",
+    "chicken": "poulet",
+    "cucumber": "concombre",
+    "egg": "oeuf",
+    "eggplant": "aubergine",
+    "flour": "farine",
+    "garlic": "ail",
+    "green bean": "haricot vert",
+    "leek": "poireau",
+    "lettuce": "laitue",
+    "milk": "lait",
+    "mushroom": "champignon",
+    "new potato": "pomme de terre nouvelle",
+    "olive oil": "huile d'olive",
+    "onion": "oignon",
+    "pea": "petit pois",
+    "pepper": "poivre",
+    "pork": "porc",
+    "potato": "pomme de terre",
+    "radish": "radis",
+    "redcurrant": "groseille",
+    "rice": "riz",
+    "salt": "sel",
+    "spinach": "epinard",
+    "strawberry": "fraise",
+    "tomato": "tomate",
+    "turnip": "navet",
+    "zucchini": "courgette",
+}
+
 EUFIC_DISPLAY_MAP: dict[str, str] = {
     "czechrepublic": "Czech Republic",
     "unitedkingdom": "United Kingdom",
@@ -642,6 +688,15 @@ def _unique_options_by_normalized_name(options: list[str]) -> list[str]:
     return output
 
 
+def ingredient_display_name(name: str, lang: str) -> str:
+    """Return the UI label for an ingredient while keeping its raw value internal."""
+    if lang != "fr":
+        return name
+
+    normalized = _normalize_option_name(name)
+    return FR_INGREDIENT_LABELS.get(normalized, name)
+
+
 SEASONAL_PRODUCE_CATEGORIES = frozenset({"fruit", "vegetable"})
 
 
@@ -1127,12 +1182,14 @@ def main() -> None:
                     texts["seasonal_ingredients_label"],
                     options=seasonal_options,
                     default=[],
+                    format_func=lambda item: ingredient_display_name(item, lang),
                 )
             with col_complementary:
                 selected_complementary = st.multiselect(
                     texts["complementary_ingredients_label"],
                     options=complementary_options,
                     default=[],
+                    format_func=lambda item: ingredient_display_name(item, lang),
                 )
         else:
             st.warning(texts["basket_note_eufic_unavailable"])
@@ -1142,6 +1199,7 @@ def main() -> None:
                 texts["complementary_ingredients_label"],
                 options=complementary_options,
                 default=[],
+                format_func=lambda item: ingredient_display_name(item, lang),
             )
         basket = list(dict.fromkeys(selected_seasonal + selected_complementary))
     else:
