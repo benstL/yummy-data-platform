@@ -1,17 +1,20 @@
+import json
 import re
 from datetime import datetime, UTC
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 
-SILVER_FOODCOM_DIR = Path("data/silver/foodcom")
-SILVER_EUFIC_DIR = Path("data/silver/eufic")
-SILVER_FAOSTAT_DIR = Path("data/silver/faostat/qcl")
-GOLD_DIR = Path("data/gold")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SILVER_FOODCOM_DIR = PROJECT_ROOT / "data/silver/foodcom"
+SILVER_EUFIC_DIR = PROJECT_ROOT / "data/silver/eufic"
+SILVER_FAOSTAT_DIR = PROJECT_ROOT / "data/silver/faostat/qcl"
+GOLD_DIR = PROJECT_ROOT / "data/gold"
+DEFAULT_TAXONOMY_PATH = PROJECT_ROOT / "config" / "ingredient_taxonomy.json"
 
 STOPWORDS = frozenset({"and", "or", "the", "a", "of", "with", "in"})
 SIMILARITY_THRESHOLD = 0.35
@@ -43,6 +46,53 @@ def save_gold(df: pd.DataFrame, filename: str) -> None:
 # ---------------------------------------------------------------------------
 # Reference vocabulary
 # ---------------------------------------------------------------------------
+
+
+def load_ingredient_taxonomy(config_path: Path | None = None) -> dict[str, str]:
+    """Load the ingredient-to-category taxonomy from a JSON config file."""
+    path = config_path or DEFAULT_TAXONOMY_PATH
+    if not path.exists():
+        return {}
+
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+
+    if isinstance(payload, dict) and "categories" in payload:
+        payload = payload["categories"]
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"Ingredient taxonomy at {path} must be a JSON object")
+
+    return {str(k).strip().lower(): str(v).strip().lower() for k, v in payload.items() if str(k).strip()}
+
+
+def normalize_ingredient_name(value: str) -> str:
+    """Normalise ingredient names for taxonomy lookup."""
+    text = re.sub(r"\s+", " ", str(value).strip().lower())
+    return text.replace("(", " ").replace(")", " ").strip()
+
+
+def map_ingredient_to_category(
+    ingredient_name: str,
+    taxonomy: Mapping[str, str] | None = None,
+) -> str:
+    """Return the business category for an ingredient, defaulting to other."""
+    if taxonomy is None:
+        taxonomy = load_ingredient_taxonomy()
+
+    normalized = normalize_ingredient_name(ingredient_name)
+    if normalized in taxonomy:
+        return str(taxonomy[normalized])
+    for key, category in taxonomy.items():
+        if (
+            normalized == key
+            or normalized.startswith(key)
+            or key.startswith(normalized)
+            or normalized in key
+            or key in normalized
+        ):
+            return str(category)
+    return "other"
 
 
 def build_reference_vocab(
@@ -295,6 +345,7 @@ def build_matches_df(
 def build_recipe_map(
     recipes_df: pd.DataFrame,
     matches_df: pd.DataFrame,
+    taxonomy: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     """Build the recipe-level ingredient mapping DataFrame.
 
@@ -305,18 +356,9 @@ def build_recipe_map(
 
     The matched_ingredients column stores a Python list of unique matched_term
     values (pyarrow list<string> in Parquet).
-
-    Args:
-        recipes_df: Silver recipes DataFrame with 'recipeid' and
-            'recipeingredientparts' columns.
-        matches_df: Token-level matches produced by build_matches_df.
-
-    Returns:
-        DataFrame with columns:
-            recipeid, matched_ingredients, eufic_match_count,
-            faostat_match_count, unmatched_count
     """
-    # --- Explode recipes to (recipeid, ingredient_token) ---
+    taxonomy = taxonomy or load_ingredient_taxonomy()
+
     long = (
         recipes_df[["recipeid", "recipeingredientparts"]]
         .copy()
@@ -328,7 +370,9 @@ def build_recipe_map(
         .explode("ingredient_token")
         .dropna(subset=["ingredient_token"])
     )
-    long["ingredient_token"] = long["ingredient_token"].astype(str)
+    long["ingredient_token"] = (
+        long["ingredient_token"].astype(str).str.strip().str.lower()
+    )
 
     keep = (
         ~long["ingredient_token"].isin(STOPWORDS)
@@ -337,15 +381,18 @@ def build_recipe_map(
     )
     long = long[keep].drop_duplicates(subset=["recipeid", "ingredient_token"])
 
-    # --- Join with token-level matches ---
+    matches_df_norm = matches_df[["ingredient_token", "matched_term", "source"]].copy()
+    matches_df_norm["ingredient_token"] = (
+        matches_df_norm["ingredient_token"].astype(str).str.strip().str.lower()
+    )
+
     long = long.merge(
-        matches_df[["ingredient_token", "matched_term", "source"]],
+        matches_df_norm,
         on="ingredient_token",
         how="left",
     )
     long["source"] = long["source"].fillna("unmatched")
 
-    # --- Per-source counts via unstack (vectorised) ---
     source_counts = (
         long.groupby(["recipeid", "source"])
         .size()
@@ -361,34 +408,68 @@ def build_recipe_map(
         "unmatched": "unmatched_count",
     })
 
-    # --- Matched ingredients list per recipe ---
-    matched_lists = (
-        long.loc[
-            (long["source"] != "unmatched") & long["matched_term"].notna(),
-            ["recipeid", "matched_term"],
-        ]
-        .groupby("recipeid")["matched_term"]
-        .apply(list)
-        .reset_index()
-        .rename(columns={"matched_term": "matched_ingredients"})
-    )
+    matched_terms = long.loc[
+        (long["source"] != "unmatched") & long["matched_term"].notna(),
+        ["recipeid", "matched_term", "source"],
+    ].copy()
+    if not matched_terms.empty:
+        matched_terms["ingredient_category"] = matched_terms["matched_term"].apply(
+            lambda value: map_ingredient_to_category(str(value), taxonomy)
+        )
+        matched_terms["is_seasonal"] = (
+            (matched_terms["source"] == "eufic") &
+            matched_terms["ingredient_category"].isin({"fruit", "vegetable"})
+        )
+    else:
+        matched_terms["ingredient_category"] = []
+        matched_terms["is_seasonal"] = []
 
-    # --- Left-join from all recipes so every recipeid is present ---
+    matched_lists = []
+    for recipeid, group in matched_terms.groupby("recipeid", sort=False):
+        terms = [str(value) for value in group["matched_term"].tolist() if pd.notna(value)]
+        categories = [str(value) for value in group["ingredient_category"].tolist() if pd.notna(value)]
+        sources = [str(value) for value in group["source"].tolist() if pd.notna(value)]
+        seasonal_terms = [
+            term for term, category, source in zip(terms, categories, sources)
+            if source == "eufic" and category in {"fruit", "vegetable"}
+        ]
+        complementary_terms = [
+            term for term, category, source in zip(terms, categories, sources)
+            if not (source == "eufic" and category in {"fruit", "vegetable"})
+        ]
+        matched_lists.append({
+            "recipeid": int(recipeid),
+            "matched_ingredients": terms,
+            "ingredient_categories": categories,
+            "seasonal_ingredients": seasonal_terms,
+            "complementary_ingredients": complementary_terms,
+        })
+
+    matched_lists_df = pd.DataFrame(matched_lists)
+
     all_ids = recipes_df[["recipeid"]].drop_duplicates()
     recipe_map = (
         all_ids
         .merge(
-            source_counts[["recipeid", "eufic_match_count",
-                           "faostat_match_count", "unmatched_count"]],
+            source_counts[["recipeid", "eufic_match_count", "faostat_match_count", "unmatched_count"]],
             on="recipeid",
             how="left",
         )
-        .merge(matched_lists, on="recipeid", how="left")
+        .merge(matched_lists_df, on="recipeid", how="left")
     )
 
     for col in ("eufic_match_count", "faostat_match_count", "unmatched_count"):
         recipe_map[col] = recipe_map[col].fillna(0).astype(int)
     recipe_map["matched_ingredients"] = recipe_map["matched_ingredients"].apply(
+        lambda x: x if isinstance(x, list) else []
+    )
+    recipe_map["ingredient_categories"] = recipe_map["ingredient_categories"].apply(
+        lambda x: x if isinstance(x, list) else []
+    )
+    recipe_map["seasonal_ingredients"] = recipe_map["seasonal_ingredients"].apply(
+        lambda x: x if isinstance(x, list) else []
+    )
+    recipe_map["complementary_ingredients"] = recipe_map["complementary_ingredients"].apply(
         lambda x: x if isinstance(x, list) else []
     )
 
@@ -398,6 +479,7 @@ def build_recipe_map(
 def build_recipe_ingredient_matches(
     recipes_df: pd.DataFrame,
     matches_df: pd.DataFrame,
+    taxonomy: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
 
     long = (
@@ -414,7 +496,9 @@ def build_recipe_ingredient_matches(
         .dropna(subset=["ingredient_token"])
     )
 
-    long["ingredient_token"] = long["ingredient_token"].astype(str)
+    long["ingredient_token"] = (
+        long["ingredient_token"].astype(str).str.strip().str.lower()
+    )
 
     keep = (
         ~long["ingredient_token"].isin(STOPWORDS)
@@ -426,20 +510,29 @@ def build_recipe_ingredient_matches(
         subset=["recipeid", "ingredient_token"]
     )
 
+    matches_df_norm = matches_df[
+        [
+            "ingredient_token",
+            "matched_term",
+            "source",
+            "similarity_score",
+        ]
+    ].copy()
+    matches_df_norm["ingredient_token"] = (
+        matches_df_norm["ingredient_token"].astype(str).str.strip().str.lower()
+    )
+
     detailed = long.merge(
-        matches_df[
-            [
-                "ingredient_token",
-                "matched_term",
-                "source",
-                "similarity_score",
-            ]
-        ],
+        matches_df_norm,
         on="ingredient_token",
         how="left",
     )
 
     detailed["source"] = detailed["source"].fillna("unmatched")
+    taxonomy = taxonomy or load_ingredient_taxonomy()
+    detailed["ingredient_category"] = detailed["matched_term"].apply(
+        lambda value: map_ingredient_to_category(str(value), taxonomy) if pd.notna(value) else "other"
+    )
 
     return detailed
 
@@ -507,7 +600,7 @@ def main() -> None:
     ).sum()
 
 
-    print(f"[INFO] Recipes with ≥1 match: {has_match:,} / {len(recipe_map_df):,}")
+    print(f"[INFO] Recipes with at least 1 match: {has_match:,} / {len(recipe_map_df):,}")
 
     save_gold(matches_df, "gold_ingredient_matches.parquet")
     save_gold(recipe_map_df, "gold_recipe_ingredient_map.parquet")

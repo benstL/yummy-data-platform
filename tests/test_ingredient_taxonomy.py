@@ -1,0 +1,171 @@
+import json
+from pathlib import Path
+
+import pandas as pd
+
+from api.main import build_ingredient_buckets
+from app.streamlit_app import build_business_ingredient_options
+from ml.matching.ingredient_matcher import (
+    build_recipe_map,
+    load_ingredient_taxonomy,
+    map_ingredient_to_category,
+)
+
+
+def test_load_ingredient_taxonomy_reads_json_mapping(tmp_path: Path) -> None:
+    config_path = tmp_path / "ingredient_taxonomy.json"
+    config_path.write_text(
+        json.dumps({
+            "categories": {
+                "apple": "fruit",
+                "carrot": "vegetable",
+                "chicken": "meat",
+                "milk": "dairy",
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    taxonomy = load_ingredient_taxonomy(config_path)
+
+    assert taxonomy["apple"] == "fruit"
+    assert taxonomy["carrot"] == "vegetable"
+    assert taxonomy["chicken"] == "meat"
+
+
+def test_map_ingredient_to_category_uses_normalized_lookup() -> None:
+    taxonomy = {"apple": "fruit", "carrot": "vegetable", "chicken": "meat"}
+
+    assert map_ingredient_to_category("Apples", taxonomy) == "fruit"
+    assert map_ingredient_to_category("CARROT", taxonomy) == "vegetable"
+    assert map_ingredient_to_category("unknown", taxonomy) == "other"
+
+
+def test_default_taxonomy_includes_seasonal_produce() -> None:
+    root = Path(__file__).resolve().parents[1]
+    taxonomy = load_ingredient_taxonomy(root / "config" / "ingredient_taxonomy.json")
+
+    assert taxonomy["apricot"] == "fruit"
+    assert taxonomy["artichoke"] == "vegetable"
+    assert taxonomy["asparagus"] == "vegetable"
+    assert map_ingredient_to_category("Apricots", taxonomy) == "fruit"
+    assert map_ingredient_to_category("Artichokes", taxonomy) == "vegetable"
+
+
+def test_build_recipe_map_enriches_category_lists() -> None:
+    recipes_df = pd.DataFrame(
+        {
+            "recipeid": [1],
+            "recipeingredientparts": ["Apples and chicken"],
+        }
+    )
+    matches_df = pd.DataFrame(
+        {
+            "ingredient_token": ["apples", "chicken"],
+            "matched_term": ["Apples", "Chicken"],
+            "source": ["eufic", "faostat"],
+        }
+    )
+    taxonomy = {"apple": "fruit", "chicken": "meat"}
+
+    recipe_map = build_recipe_map(recipes_df, matches_df, taxonomy=taxonomy)
+
+    assert recipe_map.loc[0, "ingredient_categories"] == ["fruit", "meat"]
+    assert recipe_map.loc[0, "seasonal_ingredients"] == ["Apples"]
+    assert recipe_map.loc[0, "complementary_ingredients"] == ["Chicken"]
+
+
+def test_build_ingredient_buckets_groups_categories() -> None:
+    df = pd.DataFrame(
+        {
+            "matched_ingredients": [["Apples", "Carrots", "Chicken"]],
+            "ingredient_categories": [["fruit", "vegetable", "meat"]],
+            "seasonal_ingredients": [["Apples", "Carrots"]],
+            "complementary_ingredients": [["Chicken"]],
+        }
+    )
+
+    buckets = build_ingredient_buckets(df)
+
+    assert buckets["seasonal_ingredients"] == ["Apples", "Carrots"]
+    assert buckets["complementary_ingredients"] == ["Chicken"]
+
+
+def test_build_ingredient_buckets_disjoint_sets() -> None:
+    df = pd.DataFrame(
+        {
+            "matched_ingredients": [["Apples", "Carrots", "Chicken", "Milk"]],
+            "ingredient_categories": [["fruit", "vegetable", "meat", "dairy"]],
+        }
+    )
+
+    buckets = build_ingredient_buckets(df)
+
+    assert set(buckets["seasonal_ingredients"]) & set(buckets["complementary_ingredients"]) == set()
+    assert buckets["seasonal_ingredients"] == ["Apples", "Carrots"]
+    assert set(buckets["complementary_ingredients"]) == {"Chicken", "Milk"}
+
+
+def test_streamlit_business_options_prioritize_eufic_over_faostat() -> None:
+    seasonal, complementary = build_business_ingredient_options(
+        eufic_items=["Apple", "Tomato", "Carrot"],
+        faostat_items=["Apple", "Chicken", "Milk", "Tomatoes"],
+        ingredient_buckets={
+            "complementary_ingredients": [
+                {"name": "Apple", "category": "fruit"},
+                {"name": "Chicken", "category": "meat"},
+                {"name": "Milk", "category": "dairy"},
+            ],
+        },
+        taxonomy={
+            "apple": "fruit",
+            "tomato": "vegetable",
+            "tomatoes": "vegetable",
+            "carrot": "vegetable",
+            "chicken": "meat",
+            "milk": "dairy",
+        },
+    )
+
+    assert seasonal == ["Apple", "Tomato", "Carrot"]
+    assert "Apple" not in complementary
+    assert "Tomatoes" not in complementary
+    assert set(complementary) == {"Chicken", "Milk"}
+
+
+def test_streamlit_business_options_are_mutually_exclusive_and_deduplicated() -> None:
+    seasonal, complementary = build_business_ingredient_options(
+        eufic_items=["Apple", "Apples", "Carrot"],
+        faostat_items=["apple", "Chicken", "Chicken", "Rice"],
+        ingredient_buckets={
+            "complementary_ingredients": ["Chicken", "Rice", "Rice", "Apple"],
+        },
+        taxonomy={
+            "apple": "fruit",
+            "apples": "fruit",
+            "carrot": "vegetable",
+            "chicken": "meat",
+            "rice": "grain",
+        },
+    )
+
+    seasonal_norm = {item.lower().rstrip("s") for item in seasonal}
+    complementary_norm = {item.lower().rstrip("s") for item in complementary}
+
+    assert seasonal == ["Apple", "Carrot"]
+    assert complementary == ["Chicken", "Rice"]
+    assert seasonal_norm & complementary_norm == set()
+    assert len(seasonal) == len(seasonal_norm)
+    assert len(complementary) == len(complementary_norm)
+
+
+def test_streamlit_business_options_use_faostat_as_produce_fallback() -> None:
+    seasonal, complementary = build_business_ingredient_options(
+        eufic_items=[],
+        faostat_items=["Mango", "Chicken"],
+        ingredient_buckets={"complementary_ingredients": []},
+        taxonomy={"mango": "fruit", "chicken": "meat"},
+    )
+
+    assert seasonal == []
+    assert complementary == ["Mango", "Chicken"]
