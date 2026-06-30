@@ -5,6 +5,7 @@ import pandas as pd
 
 from api.main import build_ingredient_buckets
 from app.streamlit_app import (
+    _looks_partially_translated,
     _translate_preparation_step,
     _translate_recipe_ingredient_text,
     _translate_recipe_detail_text,
@@ -232,6 +233,16 @@ def test_preparation_step_translates_high_confidence_phrases() -> None:
     assert "et decorer avec une tranche de banane et une cerise" in translated
     assert " and " not in translated
     assert _translate_preparation_step(source, "en") == source
+
+
+def test_partial_translation_guard_detects_mixed_recipe_text() -> None:
+    mixed = (
+        "boneless skinless poulet breasts citron marinade english concombre "
+        "swordfish fillets shrimp balsamic marinade"
+    )
+
+    assert _looks_partially_translated(mixed) is True
+    assert _looks_partially_translated("mixer tous les ingredients avec une cerise") is False
 
 
 def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:

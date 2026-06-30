@@ -1005,6 +1005,24 @@ def _translate_preparation_step(text: str, lang: str) -> str:
     return re.sub(r"\s+", " ", translated).strip()
 
 
+def _looks_partially_translated(text: str) -> bool:
+    """Return True when a French UI text still looks like mixed English/French."""
+    if not text:
+        return False
+    english_tokens = re.findall(
+        r"\b("
+        r"boneless|skinless|breasts|english|marinade|fillets|shrimp|lamb|"
+        r"skewers|freezer|bag|kebab|prepared|thread|grilling|discarded|"
+        r"platter|slice|serve|blend|garnish|with|until|smooth|glass"
+        r")\b",
+        text.lower(),
+    )
+    words = re.findall(r"\b[a-zA-Z]+\b", text)
+    return len(english_tokens) >= 3 or (
+        bool(words) and len(english_tokens) / max(len(words), 1) > 0.12
+    )
+
+
 def _instruction_steps(value: Any) -> list[str]:
     """Split long Food.com instruction text into readable preparation steps."""
     text = _detail_text(value)
@@ -1824,22 +1842,34 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
                 _translate_preparation_step(step, lang)
                 for step in _instruction_steps(row.get("recipeinstructions"))
             ]
+            show_recipe_ingredients = not (
+                lang == "fr" and _looks_partially_translated(recipe_ingredients)
+            )
+            show_recipe_steps = not (
+                lang == "fr"
+                and recipe_steps
+                and all(_looks_partially_translated(step) for step in recipe_steps)
+            )
 
             if lang == "fr":
                 st.caption(
-                    "Les détails complets proviennent de Food.com et sont affichés dans leur langue source."
+                    "Les détails complets proviennent de Food.com. Les passages non traduits proprement sont masqués pour éviter le franglais."
                 )
 
             st.markdown("### 🥣 Ingrédients de la recette")
-            if recipe_ingredients:
+            if recipe_ingredients and show_recipe_ingredients:
                 st.write(recipe_ingredients)
+            elif lang == "fr":
+                st.caption("Ingrédients détaillés non traduits proprement. Voir les ingrédients reconnus ci-dessous.")
             else:
                 st.caption("Ingrédients détaillés indisponibles.")
 
             st.markdown("### 👩‍🍳 Préparation")
-            if recipe_steps:
+            if recipe_steps and show_recipe_steps:
                 for idx, step in enumerate(recipe_steps, start=1):
                     st.write(f"{idx}. {step}")
+            elif lang == "fr":
+                st.caption("Préparation non traduite proprement pour cette recette.")
             else:
                 st.caption("Préparation indisponible.")
 
