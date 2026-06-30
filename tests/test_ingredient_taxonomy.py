@@ -5,6 +5,7 @@ import pandas as pd
 
 from api.main import build_ingredient_buckets
 from app.streamlit_app import (
+    _translate_preparation_step,
     _translate_recipe_ingredient_text,
     _translate_recipe_detail_text,
     add_basket_relevance_scores,
@@ -216,6 +217,21 @@ def test_recipe_ingredient_text_translates_known_food_terms_only() -> None:
     assert "poivre noir fraichement moulu" in translated
     assert "origan seche" in translated
     assert _translate_recipe_ingredient_text(source, "en") == source
+
+
+def test_preparation_step_translates_high_confidence_phrases() -> None:
+    source = (
+        "blend all ingredients with half a glassful of crushed ice until smooth "
+        "serve in a collins glass and garnish with a banana slice and cherry"
+    )
+
+    translated = _translate_preparation_step(source, "fr")
+
+    assert "mixer tous les ingredients" in translated
+    assert "servir dans un verre Collins" in translated
+    assert "et decorer avec une tranche de banane et une cerise" in translated
+    assert " and " not in translated
+    assert _translate_preparation_step(source, "en") == source
 
 
 def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:

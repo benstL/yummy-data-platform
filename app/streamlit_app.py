@@ -347,6 +347,73 @@ FR_RECIPE_DETAIL_LABELS: dict[str, str] = {
     "for": "pendant",
 }
 
+FR_PREPARATION_PHRASES: dict[str, str] = {
+    "blend all ingredients with half a glassful of crushed ice until smooth": (
+        "mixer tous les ingredients avec un demi-verre de glace pilee jusqu'a obtenir une texture lisse"
+    ),
+    "serve in a collins glass": "servir dans un verre Collins",
+    "and garnish with a banana slice and cherry": (
+        "et decorer avec une tranche de banane et une cerise"
+    ),
+    "garnish with a banana slice and cherry": (
+        "decorer avec une tranche de banane et une cerise"
+    ),
+    "pre heat oven": "prechauffer le four",
+    "preheat oven": "prechauffer le four",
+    "mix together": "melanger",
+    "slice the courgettes": "couper les courgettes",
+    "cut the peppers": "couper les poivrons",
+    "cut the onions": "couper les oignons",
+    "put all the prepared vegetables": "mettre tous les legumes prepares",
+    "pour on the olive oil mixture": "verser le melange d'huile d'olive",
+    "stir until all vegetables are covered": (
+        "remuer jusqu'a ce que tous les legumes soient enrobes"
+    ),
+    "spread out onto": "etaler sur",
+    "cook on the middle shelf": "cuire sur la grille du milieu",
+    "turning half way": "en retournant a mi-cuisson",
+}
+
+FR_PREPARATION_TERMS: dict[str, str] = {
+    **FR_RECIPE_INGREDIENT_LABELS,
+    "all ingredients": "tous les ingredients",
+    "ingredients": "ingredients",
+    "crushed ice": "glace pilee",
+    "glassful": "verre",
+    "half": "demi",
+    "smooth": "lisse",
+    "serve": "servir",
+    "garnish": "decorer",
+    "banana slice": "tranche de banane",
+    "slice": "tranche",
+    "cherry": "cerise",
+    "blend": "mixer",
+    "mix": "melanger",
+    "stir": "remuer",
+    "cook": "cuire",
+    "oven": "four",
+}
+
+_PREPARATION_ENGLISH_MARKERS = frozenset(
+    {
+        "blend",
+        "serve",
+        "garnish",
+        "with",
+        "until",
+        "smooth",
+        "glass",
+        "slice",
+        "preheat",
+        "oven",
+        "mix",
+        "cut",
+        "cook",
+        "stir",
+        "pour",
+    }
+)
+
 EUFIC_DISPLAY_MAP: dict[str, str] = {
     "czechrepublic": "Czech Republic",
     "unitedkingdom": "United Kingdom",
@@ -895,6 +962,46 @@ def _translate_recipe_ingredient_text(text: str, lang: str) -> str:
             translated,
             flags=re.IGNORECASE,
         )
+    return re.sub(r"\s+", " ", translated).strip()
+
+
+def _translate_preparation_step(text: str, lang: str) -> str:
+    """Translate preparation text only when phrase coverage is good enough."""
+    if lang != "fr" or not text:
+        return text
+
+    translated = text
+    for source, target in sorted(
+        FR_PREPARATION_PHRASES.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        translated = re.sub(
+            rf"\b{re.escape(source)}\b",
+            target,
+            translated,
+            flags=re.IGNORECASE,
+        )
+
+    for source, target in sorted(
+        FR_PREPARATION_TERMS.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        translated = re.sub(
+            rf"\b{re.escape(source)}\b",
+            target,
+            translated,
+            flags=re.IGNORECASE,
+        )
+
+    remaining_markers = re.findall(
+        r"\b(" + "|".join(sorted(_PREPARATION_ENGLISH_MARKERS)) + r")\b",
+        translated.lower(),
+    )
+    if len(remaining_markers) > 2:
+        return text
+
     return re.sub(r"\s+", " ", translated).strip()
 
 
@@ -1713,7 +1820,10 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
                 _detail_text(row.get("recipeingredientparts")),
                 lang,
             )
-            recipe_steps = _instruction_steps(row.get("recipeinstructions"))
+            recipe_steps = [
+                _translate_preparation_step(step, lang)
+                for step in _instruction_steps(row.get("recipeinstructions"))
+            ]
 
             if lang == "fr":
                 st.caption(
