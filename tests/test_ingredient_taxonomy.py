@@ -187,6 +187,7 @@ def test_ingredient_display_name_translates_only_for_french() -> None:
 
 def test_ingredient_display_name_keeps_unknown_raw_value() -> None:
     assert ingredient_display_name("unknown ingredient", "fr") == "unknown ingredient"
+    assert ingredient_display_name("fresh asparagus sausage", "fr") == "fresh asparagus sausage"
 
 
 def test_recipe_detail_text_translates_common_foodcom_terms_to_french() -> None:
@@ -198,7 +199,7 @@ def test_recipe_detail_text_translates_common_foodcom_terms_to_french() -> None:
 
 def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:
     labels, label_to_raw = build_localized_option_map(
-        ["mushroom", "tomato", "sugar beet", "water broth", "cream"],
+        ["mushroom", "tomato", "sugar beet", "water broth", "cream", "spices"],
         "fr",
     )
 
@@ -208,12 +209,14 @@ def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:
         "betterave sucriere",
         "eau ou bouillon",
         "creme",
+        "epices",
     ]
     assert label_to_raw["champignon"] == "mushroom"
     assert label_to_raw["tomate"] == "tomato"
     assert label_to_raw["betterave sucriere"] == "sugar beet"
     assert label_to_raw["eau ou bouillon"] == "water broth"
     assert label_to_raw["creme"] == "cream"
+    assert label_to_raw["epices"] == "spices"
 
 
 def test_basket_relevance_rewards_multiple_matches() -> None:

@@ -907,10 +907,7 @@ def ingredient_display_name(name: str, lang: str) -> str:
         return FR_RECIPE_DETAIL_LABELS[raw_key]
 
     normalized = _normalize_option_name(name)
-    return FR_RECIPE_DETAIL_LABELS.get(
-        normalized,
-        _translate_recipe_detail_text(name, lang),
-    )
+    return FR_RECIPE_DETAIL_LABELS.get(normalized, name)
 
 
 def build_localized_option_map(options: list[str], lang: str) -> tuple[list[str], dict[str, str]]:
@@ -1670,14 +1667,13 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
 
         with st.expander("📖 Détails de la recette"):
 
-            recipe_ingredients = _translate_recipe_detail_text(
-                _detail_text(row.get("recipeingredientparts")),
-                lang,
-            )
-            recipe_steps = [
-                _translate_recipe_detail_text(step, lang)
-                for step in _instruction_steps(row.get("recipeinstructions"))
-            ]
+            recipe_ingredients = _detail_text(row.get("recipeingredientparts"))
+            recipe_steps = _instruction_steps(row.get("recipeinstructions"))
+
+            if lang == "fr":
+                st.caption(
+                    "Les détails complets proviennent de Food.com et sont affichés dans leur langue source."
+                )
 
             st.markdown("### 🥣 Ingrédients de la recette")
             if recipe_ingredients:
