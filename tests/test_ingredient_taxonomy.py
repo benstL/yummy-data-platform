@@ -5,6 +5,7 @@ import pandas as pd
 
 from api.main import build_ingredient_buckets
 from app.streamlit_app import (
+    _french_recipe_summary,
     _looks_partially_translated,
     _translate_preparation_step,
     _translate_recipe_ingredient_text,
@@ -243,6 +244,22 @@ def test_partial_translation_guard_detects_mixed_recipe_text() -> None:
 
     assert _looks_partially_translated(mixed) is True
     assert _looks_partially_translated("mixer tous les ingredients avec une cerise") is False
+
+
+def test_french_recipe_summary_uses_recognized_ingredients() -> None:
+    row = pd.Series(
+        {
+            "matched_ingredients": ["asparagus", "pork"],
+            "totaltime": 25,
+            "recipecategory": "vegetable",
+        }
+    )
+
+    ingredients, steps = _french_recipe_summary(row)
+
+    assert ingredients == "asperge, porc"
+    assert all("fresh" not in step.lower() for step in steps)
+    assert any("Prevoir environ 25 min" in step for step in steps)
 
 
 def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:
