@@ -182,6 +182,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "cream": "creme",
     "cranberry": "canneberge",
     "cranberries": "canneberges",
+    "courgettes": "courgettes",
     "currant": "groseille",
     "currants": "groseilles",
     "cucumber": "concombre",
@@ -242,6 +243,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "spices": "epices",
     "spinach": "epinard",
     "strawberry": "fraise",
+    "sugar": "sucre",
     "tangerine": "mandarine",
     "tangerines": "mandarines",
     "tomato": "tomate",
@@ -252,10 +254,34 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "yogurt": "yaourt",
     "yoghurt": "yaourt",
     "zucchini": "courgette",
+    "zucchinis": "courgettes",
+}
+
+FR_RECIPE_INGREDIENT_LABELS: dict[str, str] = {
+    **FR_INGREDIENT_LABELS,
+    "red bell pepper": "poivron rouge",
+    "yellow bell pepper": "poivron jaune",
+    "green bell pepper": "poivron vert",
+    "red pepper": "poivron rouge",
+    "yellow pepper": "poivron jaune",
+    "green pepper": "poivron vert",
+    "red onions": "oignons rouges",
+    "red onion": "oignon rouge",
+    "olive oil": "huile d'olive",
+    "tomato puree": "puree de tomate",
+    "tomato paste": "concentre de tomate",
+    "fresh ground black pepper": "poivre noir fraichement moulu",
+    "ground black pepper": "poivre noir moulu",
+    "black pepper": "poivre noir",
+    "dried oregano": "origan seche",
+    "oregano": "origan",
+    "balsamic vinegar": "vinaigre balsamique",
+    "aubergines": "aubergines",
+    "courgettes": "courgettes",
 }
 
 FR_RECIPE_DETAIL_LABELS: dict[str, str] = {
-    **FR_INGREDIENT_LABELS,
+    **FR_RECIPE_INGREDIENT_LABELS,
     "trim and wash": "parer et laver",
     "the artichoke": "l'artichaut",
     "a covered microwave safe container": "un recipient couvert compatible micro-ondes",
@@ -840,6 +866,26 @@ def _translate_recipe_detail_text(text: str, lang: str) -> str:
     translated = text
     for source, target in sorted(
         FR_RECIPE_DETAIL_LABELS.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        translated = re.sub(
+            rf"\b{re.escape(source)}\b",
+            target,
+            translated,
+            flags=re.IGNORECASE,
+        )
+    return re.sub(r"\s+", " ", translated).strip()
+
+
+def _translate_recipe_ingredient_text(text: str, lang: str) -> str:
+    """Translate known ingredient phrases without touching preparation prose."""
+    if lang != "fr" or not text:
+        return text
+
+    translated = text
+    for source, target in sorted(
+        FR_RECIPE_INGREDIENT_LABELS.items(),
         key=lambda item: len(item[0]),
         reverse=True,
     ):
@@ -1663,7 +1709,10 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
 
         with st.expander("📖 Détails de la recette"):
 
-            recipe_ingredients = _detail_text(row.get("recipeingredientparts"))
+            recipe_ingredients = _translate_recipe_ingredient_text(
+                _detail_text(row.get("recipeingredientparts")),
+                lang,
+            )
             recipe_steps = _instruction_steps(row.get("recipeinstructions"))
 
             if lang == "fr":
