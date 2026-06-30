@@ -5,6 +5,7 @@ import pandas as pd
 
 from api.main import build_ingredient_buckets
 from app.streamlit_app import (
+    _translate_recipe_detail_text,
     add_basket_relevance_scores,
     build_business_ingredient_options,
     build_localized_option_map,
@@ -186,6 +187,13 @@ def test_ingredient_display_name_translates_only_for_french() -> None:
 
 def test_ingredient_display_name_keeps_unknown_raw_value() -> None:
     assert ingredient_display_name("unknown ingredient", "fr") == "unknown ingredient"
+
+
+def test_recipe_detail_text_translates_common_foodcom_terms_to_french() -> None:
+    source = "artichoke water broth"
+
+    assert _translate_recipe_detail_text(source, "fr") == "artichaut eau ou bouillon"
+    assert _translate_recipe_detail_text(source, "en") == source
 
 
 def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:

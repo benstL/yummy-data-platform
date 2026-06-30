@@ -239,6 +239,73 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "zucchini": "courgette",
 }
 
+FR_RECIPE_DETAIL_LABELS: dict[str, str] = {
+    **FR_INGREDIENT_LABELS,
+    "trim and wash": "parer et laver",
+    "the artichoke": "l'artichaut",
+    "a covered microwave safe container": "un recipient couvert compatible micro-ondes",
+    "covered microwave safe container": "recipient couvert compatible micro-ondes",
+    "with a steam vent": "avec un event vapeur",
+    "add water or broth": "ajouter de l'eau ou du bouillon",
+    "water or broth": "eau ou bouillon",
+    "water broth": "eau ou bouillon",
+    "water": "eau",
+    "broth": "bouillon",
+    "olive": "olive",
+    "oil": "huile",
+    "clove": "gousse",
+    "ginger": "gingembre",
+    "sugar": "sucre",
+    "ketchup": "ketchup",
+    "vinegar": "vinaigre",
+    "soy sauce": "sauce soja",
+    "garlic powder": "ail en poudre",
+    "seasoning": "assaisonnement",
+    "seasonings": "assaisonnements",
+    "as usual": "comme d'habitude",
+    "if desired": "si souhaite",
+    "light dusting": "fine couche",
+    "between the layers": "entre les couches",
+    "microwave safe": "compatible micro-ondes",
+    "steam vent": "event vapeur",
+    "high": "puissance maximale",
+    "mins": "min",
+    "minutes": "minutes",
+    "minute": "minute",
+    "trim": "parer",
+    "wash": "laver",
+    "place": "placer",
+    "covered": "couvert",
+    "container": "recipient",
+    "add": "ajouter",
+    "sprinkle": "saupoudrer",
+    "work well": "fonctionnent bien",
+    "microwave": "cuire au micro-ondes",
+    "rotating": "en tournant",
+    "every": "toutes les",
+    "heat": "chauffer",
+    "cook": "cuire",
+    "cooked": "cuit",
+    "mix": "melanger",
+    "combine": "melanger",
+    "stir": "remuer",
+    "serve": "servir",
+    "enjoy": "deguster",
+    "boil": "faire bouillir",
+    "simmer": "laisser mijoter",
+    "reduce": "reduire",
+    "remove": "retirer",
+    "until": "jusqu'a ce que",
+    "with": "avec",
+    "and": "et",
+    "or": "ou",
+    "the": "le",
+    "a": "un",
+    "in": "dans",
+    "on": "sur",
+    "for": "pendant",
+}
+
 EUFIC_DISPLAY_MAP: dict[str, str] = {
     "czechrepublic": "Czech Republic",
     "unitedkingdom": "United Kingdom",
@@ -748,6 +815,26 @@ def _detail_text(value: Any) -> str:
     if isinstance(value, (list, tuple, set)):
         return ", ".join(str(item).strip() for item in value if str(item).strip())
     return str(value).strip()
+
+
+def _translate_recipe_detail_text(text: str, lang: str) -> str:
+    """Translate common Food.com recipe-detail terms for the French UI."""
+    if lang != "fr" or not text:
+        return text
+
+    translated = text
+    for source, target in sorted(
+        FR_RECIPE_DETAIL_LABELS.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        translated = re.sub(
+            rf"\b{re.escape(source)}\b",
+            target,
+            translated,
+            flags=re.IGNORECASE,
+        )
+    return re.sub(r"\s+", " ", translated).strip()
 
 
 def _instruction_steps(value: Any) -> list[str]:
@@ -1557,8 +1644,14 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
 
         with st.expander("📖 Détails de la recette"):
 
-            recipe_ingredients = _detail_text(row.get("recipeingredientparts"))
-            recipe_steps = _instruction_steps(row.get("recipeinstructions"))
+            recipe_ingredients = _translate_recipe_detail_text(
+                _detail_text(row.get("recipeingredientparts")),
+                lang,
+            )
+            recipe_steps = [
+                _translate_recipe_detail_text(step, lang)
+                for step in _instruction_steps(row.get("recipeinstructions"))
+            ]
 
             st.markdown("### 🥣 Ingrédients de la recette")
             if recipe_ingredients:
@@ -1596,7 +1689,7 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
             ingredients = list(row["matched_ingredients"])
 
             for ingredient in ingredients:
-                st.write(f"• {ingredient}")
+                st.write(f"• {ingredient_display_name(str(ingredient), lang)}")
 
         st.divider()
           
