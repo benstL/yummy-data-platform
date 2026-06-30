@@ -187,6 +187,7 @@ def test_ingredient_display_name_translates_only_for_french() -> None:
 
 def test_ingredient_display_name_keeps_unknown_raw_value() -> None:
     assert ingredient_display_name("unknown ingredient", "fr") == "unknown ingredient"
+    assert ingredient_display_name("fresh asparagus sausage", "fr") == "fresh asparagus sausage"
 
 
 def test_recipe_detail_text_translates_common_foodcom_terms_to_french() -> None:
@@ -198,14 +199,40 @@ def test_recipe_detail_text_translates_common_foodcom_terms_to_french() -> None:
 
 def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:
     labels, label_to_raw = build_localized_option_map(
-        ["mushroom", "tomato", "sugar beet"],
+        [
+            "mushroom",
+            "tomato",
+            "sugar beet",
+            "almonds, in shell",
+            "barley",
+            "beef and buffalo meat, primary",
+            "beer of barley, malted",
+            "black bean",
+            "brazil nuts, in shell",
+        ],
         "fr",
     )
 
-    assert labels == ["champignon", "tomate", "betterave sucriere"]
+    assert labels == [
+        "champignon",
+        "tomate",
+        "betterave sucriere",
+        "amandes en coque",
+        "orge",
+        "viande bovine et buffle",
+        "biere d'orge maltee",
+        "haricot noir",
+        "noix du Bresil en coque",
+    ]
     assert label_to_raw["champignon"] == "mushroom"
     assert label_to_raw["tomate"] == "tomato"
     assert label_to_raw["betterave sucriere"] == "sugar beet"
+    assert label_to_raw["amandes en coque"] == "almonds, in shell"
+    assert label_to_raw["orge"] == "barley"
+    assert label_to_raw["viande bovine et buffle"] == "beef and buffalo meat, primary"
+    assert label_to_raw["biere d'orge maltee"] == "beer of barley, malted"
+    assert label_to_raw["haricot noir"] == "black bean"
+    assert label_to_raw["noix du Bresil en coque"] == "brazil nuts, in shell"
 
 
 def test_basket_relevance_rewards_multiple_matches() -> None:

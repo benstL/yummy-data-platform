@@ -145,6 +145,7 @@ _FAO_AGGREGATE_PATTERNS = ("primary", " total", ", total", "poultry", " meat", "
 FR_INGREDIENT_LABELS: dict[str, str] = {
     "apple": "pomme",
     "apples": "pommes",
+    "almonds, in shell": "amandes en coque",
     "apricot": "abricot",
     "apricots": "abricots",
     "artichoke": "artichaut",
@@ -153,14 +154,19 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "avocado": "avocat",
     "avocados": "avocats",
     "banana": "banane",
+    "barley": "orge",
     "berries": "baies",
     "bean": "haricot",
     "beef": "boeuf",
+    "beef and buffalo meat, primary": "viande bovine et buffle",
+    "beer of barley, malted": "biere d'orge maltee",
     "bell pepper": "poivron",
     "blackberry": "mure",
     "blackberries": "mures",
+    "black bean": "haricot noir",
     "blueberry": "myrtille",
     "blueberries": "myrtilles",
+    "brazil nuts, in shell": "noix du Bresil en coque",
     "broccoli": "brocoli",
     "butter": "beurre",
     "cabbage": "chou",
@@ -173,6 +179,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "cherry": "cerise",
     "cherries": "cerises",
     "chicken": "poulet",
+    "cream": "creme",
     "cranberry": "canneberge",
     "cranberries": "canneberges",
     "currant": "groseille",
@@ -181,6 +188,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "date": "datte",
     "dates": "dattes",
     "egg": "oeuf",
+    "eggs": "oeufs",
     "eggplant": "aubergine",
     "fig": "figue",
     "figs": "figues",
@@ -210,6 +218,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "papaya": "papaye",
     "papayas": "papayes",
     "pea": "petit pois",
+    "pasta": "pates",
     "peach": "peche",
     "pear": "poire",
     "pepper": "poivre",
@@ -226,7 +235,11 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "red berry": "fruit rouge",
     "redcurrant": "groseille",
     "rice": "riz",
+    "sauce": "sauce",
+    "sauces": "sauces",
     "salt": "sel",
+    "spice": "epice",
+    "spices": "epices",
     "spinach": "epinard",
     "strawberry": "fraise",
     "tangerine": "mandarine",
@@ -236,6 +249,8 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "sugar beet": "betterave sucriere",
     "watermelon": "pasteque",
     "watermelons": "pasteques",
+    "yogurt": "yaourt",
+    "yoghurt": "yaourt",
     "zucchini": "courgette",
 }
 
@@ -883,8 +898,12 @@ def ingredient_display_name(name: str, lang: str) -> str:
     if lang != "fr":
         return name
 
+    raw_key = re.sub(r"\s+", " ", str(name).strip().lower())
+    if raw_key in FR_RECIPE_DETAIL_LABELS:
+        return FR_RECIPE_DETAIL_LABELS[raw_key]
+
     normalized = _normalize_option_name(name)
-    return FR_INGREDIENT_LABELS.get(normalized, name)
+    return FR_RECIPE_DETAIL_LABELS.get(normalized, name)
 
 
 def build_localized_option_map(options: list[str], lang: str) -> tuple[list[str], dict[str, str]]:
@@ -1644,14 +1663,13 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
 
         with st.expander("📖 Détails de la recette"):
 
-            recipe_ingredients = _translate_recipe_detail_text(
-                _detail_text(row.get("recipeingredientparts")),
-                lang,
-            )
-            recipe_steps = [
-                _translate_recipe_detail_text(step, lang)
-                for step in _instruction_steps(row.get("recipeinstructions"))
-            ]
+            recipe_ingredients = _detail_text(row.get("recipeingredientparts"))
+            recipe_steps = _instruction_steps(row.get("recipeinstructions"))
+
+            if lang == "fr":
+                st.caption(
+                    "Les détails complets proviennent de Food.com et sont affichés dans leur langue source."
+                )
 
             st.markdown("### 🥣 Ingrédients de la recette")
             if recipe_ingredients:
