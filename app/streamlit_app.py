@@ -173,6 +173,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "cherry": "cerise",
     "cherries": "cerises",
     "chicken": "poulet",
+    "cream": "creme",
     "cranberry": "canneberge",
     "cranberries": "canneberges",
     "currant": "groseille",
@@ -181,6 +182,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "date": "datte",
     "dates": "dattes",
     "egg": "oeuf",
+    "eggs": "oeufs",
     "eggplant": "aubergine",
     "fig": "figue",
     "figs": "figues",
@@ -210,6 +212,7 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "papaya": "papaye",
     "papayas": "papayes",
     "pea": "petit pois",
+    "pasta": "pates",
     "peach": "peche",
     "pear": "poire",
     "pepper": "poivre",
@@ -226,7 +229,13 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "red berry": "fruit rouge",
     "redcurrant": "groseille",
     "rice": "riz",
+    "sauce": "sauce",
+    "sauces": "sauces",
     "salt": "sel",
+    "spice": "epice",
+    "spices": "epices",
+    "spiy": "epices",
+    "spicy": "epices",
     "spinach": "epinard",
     "strawberry": "fraise",
     "tangerine": "mandarine",
@@ -236,6 +245,8 @@ FR_INGREDIENT_LABELS: dict[str, str] = {
     "sugar beet": "betterave sucriere",
     "watermelon": "pasteque",
     "watermelons": "pasteques",
+    "yogurt": "yaourt",
+    "yoghurt": "yaourt",
     "zucchini": "courgette",
 }
 
@@ -249,6 +260,14 @@ FR_RECIPE_DETAIL_LABELS: dict[str, str] = {
     "add water or broth": "ajouter de l'eau ou du bouillon",
     "water or broth": "eau ou bouillon",
     "water broth": "eau ou bouillon",
+    "chicken broth": "bouillon de poulet",
+    "beef broth": "bouillon de boeuf",
+    "vegetable broth": "bouillon de legumes",
+    "heavy cream": "creme epaisse",
+    "sour cream": "creme aigre",
+    "cream cheese": "fromage frais",
+    "brown sugar": "sucre brun",
+    "red pepper flakes": "flocons de piment rouge",
     "water": "eau",
     "broth": "bouillon",
     "olive": "olive",
@@ -883,8 +902,15 @@ def ingredient_display_name(name: str, lang: str) -> str:
     if lang != "fr":
         return name
 
+    raw_key = re.sub(r"\s+", " ", str(name).strip().lower())
+    if raw_key in FR_RECIPE_DETAIL_LABELS:
+        return FR_RECIPE_DETAIL_LABELS[raw_key]
+
     normalized = _normalize_option_name(name)
-    return FR_INGREDIENT_LABELS.get(normalized, name)
+    return FR_RECIPE_DETAIL_LABELS.get(
+        normalized,
+        _translate_recipe_detail_text(name, lang),
+    )
 
 
 def build_localized_option_map(options: list[str], lang: str) -> tuple[list[str], dict[str, str]]:

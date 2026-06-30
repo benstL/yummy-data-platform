@@ -198,14 +198,22 @@ def test_recipe_detail_text_translates_common_foodcom_terms_to_french() -> None:
 
 def test_localized_option_map_displays_french_but_keeps_raw_values() -> None:
     labels, label_to_raw = build_localized_option_map(
-        ["mushroom", "tomato", "sugar beet"],
+        ["mushroom", "tomato", "sugar beet", "water broth", "cream"],
         "fr",
     )
 
-    assert labels == ["champignon", "tomate", "betterave sucriere"]
+    assert labels == [
+        "champignon",
+        "tomate",
+        "betterave sucriere",
+        "eau ou bouillon",
+        "creme",
+    ]
     assert label_to_raw["champignon"] == "mushroom"
     assert label_to_raw["tomate"] == "tomato"
     assert label_to_raw["betterave sucriere"] == "sugar beet"
+    assert label_to_raw["eau ou bouillon"] == "water broth"
+    assert label_to_raw["creme"] == "cream"
 
 
 def test_basket_relevance_rewards_multiple_matches() -> None:
