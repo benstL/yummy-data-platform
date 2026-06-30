@@ -482,7 +482,10 @@ def load_yummy_recommendations() -> pd.DataFrame:
             "recipeid",
             "name",
             "recipecategory",
+            "recipeingredientparts",
+            "recipeinstructions",
             "totaltime",
+            "ingredient_count",
             "aggregatedrating",
             "reviewcount",
             "yummy_score",
@@ -734,6 +737,31 @@ def _to_ingredient_set(value: Any) -> set[str]:
         return set(value)
     except TypeError:
         return set()
+
+
+def _detail_text(value: Any) -> str:
+    """Return a clean text value for recipe ingredient/instruction details."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and pd.isna(value):
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item).strip() for item in value if str(item).strip())
+    return str(value).strip()
+
+
+def _instruction_steps(value: Any) -> list[str]:
+    """Split long Food.com instruction text into readable preparation steps."""
+    text = _detail_text(value)
+    if not text:
+        return []
+
+    steps = [
+        step.strip(" .")
+        for step in re.split(r"(?<=[.!?])\s+|\s+\d+\.\s+", text)
+        if step.strip(" .")
+    ]
+    return steps or [text]
 
 
 def _normalize_option_name(value: str) -> str:
@@ -1528,6 +1556,24 @@ Un bonus est ajouté lorsque plus de 2/3 des ingrédients reconnus possèdent un
         )
 
         with st.expander("📖 Détails de la recette"):
+
+            recipe_ingredients = _detail_text(row.get("recipeingredientparts"))
+            recipe_steps = _instruction_steps(row.get("recipeinstructions"))
+
+            st.markdown("### 🥣 Ingrédients de la recette")
+            if recipe_ingredients:
+                st.write(recipe_ingredients)
+            else:
+                st.caption("Ingrédients détaillés indisponibles.")
+
+            st.markdown("### 👩‍🍳 Préparation")
+            if recipe_steps:
+                for idx, step in enumerate(recipe_steps, start=1):
+                    st.write(f"{idx}. {step}")
+            else:
+                st.caption("Préparation indisponible.")
+
+            st.divider()
 
             st.markdown("### 🌍 Durabilité")
 
